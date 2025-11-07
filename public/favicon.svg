@@ -1,0 +1,19 @@
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <!-- Car body -->
+  <rect x="4" y="12" width="24" height="8" rx="4" fill="#4ECDC4"/>
+  <!-- Car roof -->
+  <rect x="8" y="8" width="16" height="8" rx="3" fill="#44A08D"/>
+  <!-- Front windshield -->
+  <rect x="22" y="10" width="4" height="4" rx="1" fill="#E8F8F5"/>
+  <!-- Side windows -->
+  <rect x="10" y="10" width="4" height="4" rx="1" fill="#E8F8F5"/>
+  <rect x="16" y="10" width="4" height="4" rx="1" fill="#E8F8F5"/>
+  <!-- Wheels -->
+  <circle cx="10" cy="22" r="3" fill="#2C3E50"/>
+  <circle cx="22" cy="22" r="3" fill="#2C3E50"/>
+  <!-- Wheel centers -->
+  <circle cx="10" cy="22" r="1.5" fill="#4ECDC4"/>
+  <circle cx="22" cy="22" r="1.5" fill="#4ECDC4"/>
+  <!-- Speed bump warning indicator -->
+  <rect x="26" y="6" width="4" height="2" rx="1" fill="#FF6B6B"/>
+</svg>

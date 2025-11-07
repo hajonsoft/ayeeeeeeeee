@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { GeoPoint } from 'firebase/firestore';
-import { db } from './firebase';
-import { GeoFirestore } from 'geofirestore';
+import { collection, addDoc, query, where, onSnapshot } from 'firebase/firestore';
+import { signInWithPopup, GoogleAuthProvider, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
+import { db, auth } from './firebase';
 import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
 import './App.css';
 
@@ -21,14 +21,17 @@ function App() {
   const [lastQueryLocation, setLastQueryLocation] = useState(null);
   const [isLoadingSpeedBumps, setIsLoadingSpeedBumps] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [lastQueryTime, setLastQueryTime] = useState(0);
+  const [activeQueryUnsubscribe, setActiveQueryUnsubscribe] = useState(null);
+  const [user, setUser] = useState(null);
+  const [isAuthenticating, setIsAuthenticating] = useState(true);
+  const [username, setUsername] = useState('');
 
   const NEARBY_DISTANCE = 500; // meters - for display
   const QUERY_RADIUS = 50; // kilometers - for database query
   const QUERY_UPDATE_THRESHOLD = 10; // kilometers - when to refresh query
-
-  // Initialize GeoFirestore
-  const geofirestore = new GeoFirestore(db);
-  const geocollection = geofirestore.collection('speedBumps');
+  const QUERY_COOLDOWN = 30000; // 30 seconds minimum between queries
+  const LOCATION_DEBOUNCE = 5000; // 5 seconds debounce for location updates
 
   // Calculate distance between two coordinates using Haversine formula
   const calculateDistance = useCallback((lat1, lon1, lat2, lon2) => {
@@ -62,6 +65,73 @@ function App() {
     const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
     const index = Math.round(bearing / 45) % 8;
     return directions[index];
+  }, []);
+
+  // Authentication effect
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser);
+        // Set username based on Google account or anonymous user
+        if (currentUser.displayName) {
+          setUsername(currentUser.displayName);
+        } else if (currentUser.email) {
+          setUsername(currentUser.email.split('@')[0]);
+        } else {
+          setUsername(`Driver_${currentUser.uid.slice(-8)}`);
+        }
+        setIsAuthenticating(false);
+      } else {
+        setUser(null);
+        setUsername('');
+        setIsAuthenticating(false);
+      }
+    });
+
+    return unsubscribe;
+  }, []);
+
+  // Google Sign In
+  const signInWithGoogle = useCallback(async () => {
+    try {
+      setIsAuthenticating(true);
+      const provider = new GoogleAuthProvider();
+      provider.addScope('profile');
+      provider.addScope('email');
+      
+      const result = await signInWithPopup(auth, provider);
+      console.log('Google sign-in successful:', result.user.displayName);
+    } catch (error) {
+      console.error('Google sign-in error:', error);
+      setIsAuthenticating(false);
+      if (error.code !== 'auth/popup-closed-by-user') {
+        alert('Failed to sign in with Google. Please try again.');
+      }
+    }
+  }, []);
+
+  // Anonymous Sign In
+  const signInAnonymouslyHandler = useCallback(async () => {
+    try {
+      setIsAuthenticating(true);
+      await signInAnonymously(auth);
+      console.log('Anonymous sign-in successful');
+    } catch (error) {
+      console.error('Anonymous sign-in error:', error);
+      setIsAuthenticating(false);
+      alert('Failed to sign in anonymously. Please try again.');
+    }
+  }, []);
+
+  // Sign Out
+  const handleSignOut = useCallback(async () => {
+    try {
+      await signOut(auth);
+      console.log('User signed out');
+    } catch (error) {
+      console.error('Sign out error:', error);
+      alert('Failed to sign out. Please try again.');
+    }
   }, []);
 
   // Handle new position data with improved speed calculation
@@ -139,100 +209,254 @@ function App() {
       return () => navigator.geolocation.clearWatch(watchId);
     } else {
       alert('Geolocation is not supported by this browser.');
+      return () => {}; // Return empty function if geolocation not supported
     }
   }, [handlePositionUpdate]);
 
-  // Load nearby speed bumps using geospatial query
+  // Calculate geographic bounding box for efficient querying
+  const getGeographicBounds = useCallback((centerLat, centerLng, radiusKm) => {
+    // Convert radius from km to degrees (approximate)
+    // 1 degree of latitude ≈ 111 km
+    const latDelta = radiusKm / 111;
+    const lngDelta = radiusKm / (111 * Math.cos(centerLat * Math.PI / 180));
+    
+    return {
+      north: centerLat + latDelta,
+      south: centerLat - latDelta,
+      east: centerLng + lngDelta,
+      west: centerLng - lngDelta
+    };
+  }, []);
+
+  // Load nearby speed bumps using bounding box query
   const loadNearbySpeedBumps = useCallback(async (lat, lng, radius = QUERY_RADIUS) => {
     if (!lat || !lng) return;
     
+    // Prevent multiple concurrent queries
+    if (isLoadingSpeedBumps) {
+      console.log('Query already in progress, skipping...');
+      return;
+    }
+    
+    // Clean up existing subscription
+    if (activeQueryUnsubscribe && typeof activeQueryUnsubscribe === 'function') {
+      console.log('Cleaning up previous subscription...');
+      activeQueryUnsubscribe();
+      setActiveQueryUnsubscribe(null);
+    }
+    
     setIsLoadingSpeedBumps(true);
+    setLastQueryTime(Date.now());
+    
     try {
-      // Create geospatial query
-      const geoQuery = geocollection.near({
-        center: new GeoPoint(lat, lng),
-        radius: radius
-      });
+      // Calculate bounding box
+      const bounds = getGeographicBounds(lat, lng, radius);
+      
+      console.log(`Querying speed bumps within ${radius}km of ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+      
+      // Create Firestore query with geographic bounds
+      const q = query(
+        collection(db, 'speedBumps'),
+        where('latitude', '>=', bounds.south),
+        where('latitude', '<=', bounds.north),
+        where('longitude', '>=', bounds.west),
+        where('longitude', '<=', bounds.east)
+      );
 
-      // Execute query and listen for updates
-      const unsubscribe = geoQuery.onSnapshot((snapshot) => {
+      // Listen for real-time updates
+      const unsubscribe = onSnapshot(q, (snapshot) => {
         const bumps = [];
         snapshot.forEach((doc) => {
-          bumps.push({
-            id: doc.id,
-            ...doc.data()
-          });
+          const data = doc.data();
+          // Additional distance filtering to ensure circular radius
+          const distance = calculateDistance(lat, lng, data.latitude, data.longitude);
+          if (distance <= radius * 1000) { // Convert km to meters
+            bumps.push({
+              id: doc.id,
+              ...data
+            });
+          }
         });
         
+        // Sort by distance
+        bumps.sort((a, b) => {
+          const distanceA = calculateDistance(lat, lng, a.latitude, a.longitude);
+          const distanceB = calculateDistance(lat, lng, b.latitude, b.longitude);
+          return distanceA - distanceB;
+        });
+        
+        console.log(`Loaded ${bumps.length} speed bumps from database`);
         setSpeedBumps(bumps);
+        setIsLoadingSpeedBumps(false);
+      }, (error) => {
+        console.error('Error in speed bumps subscription:', error);
         setIsLoadingSpeedBumps(false);
       });
 
+      setActiveQueryUnsubscribe(() => unsubscribe);
       return unsubscribe;
     } catch (error) {
       console.error('Error loading nearby speed bumps:', error);
       setIsLoadingSpeedBumps(false);
     }
-  }, [geocollection, QUERY_RADIUS]);
+  }, [getGeographicBounds, calculateDistance, QUERY_RADIUS, isLoadingSpeedBumps, activeQueryUnsubscribe]);
 
-  // Record speed bump to Firebase with geolocation data
+  // Record speed bump to Firebase with user information
   const recordSpeedBump = useCallback(async () => {
-    if (location.latitude && location.longitude) {
-      try {
-        const speedBump = {
-          latitude: location.latitude,
-          longitude: location.longitude,
-          direction: direction,
-          speed: speed,
-          compassDirection: getCompassDirection(direction),
-          timestamp: new Date(),
-          accuracy: location.accuracy || 0,
-          // Add coordinates field for geofirestore
-          coordinates: new GeoPoint(location.latitude, location.longitude)
-        };
-        
-        // Use geofirestore to add with geospatial indexing
-        await geocollection.add(speedBump);
-        alert('Speed bump recorded successfully!');
-        
-        // Refresh nearby speed bumps if auto-refresh is enabled
-        if (autoRefresh) {
-          loadNearbySpeedBumps(location.latitude, location.longitude);
+    if (!location.latitude || !location.longitude) {
+      alert('GPS location not available. Please wait for GPS lock.');
+      return;
+    }
+
+    if (!user) {
+      alert('Authentication required. Please wait a moment and try again.');
+      return;
+    }
+
+    try {
+      console.log('Recording speed bump...', {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        user: user.uid,
+        username: username
+      });
+
+      const speedBump = {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        direction: direction,
+        speed: speed,
+        compassDirection: getCompassDirection(direction),
+        timestamp: new Date(),
+        accuracy: location.accuracy || 0,
+        // User information
+        userId: user.uid,
+        username: username,
+        // Additional metadata
+        createdAt: new Date(),
+        deviceInfo: {
+          userAgent: navigator.userAgent,
+          platform: navigator.platform
         }
-      } catch (error) {
-        console.error('Error recording speed bump:', error);
-        alert('Failed to record speed bump. Please try again.');
+      };
+      
+      // Add to Firestore with detailed logging
+      console.log('Adding document to Firestore...', speedBump);
+      const docRef = await addDoc(collection(db, 'speedBumps'), speedBump);
+      
+      console.log('Speed bump recorded successfully with ID:', docRef.id);
+      alert(`Speed bump recorded successfully!\nID: ${docRef.id}\nUser: ${username}`);
+      
+      // Refresh nearby speed bumps if auto-refresh is enabled
+      if (autoRefresh) {
+        await loadNearbySpeedBumps(location.latitude, location.longitude);
+      }
+    } catch (error) {
+      console.error('Detailed error recording speed bump:', {
+        error: error,
+        code: error.code,
+        message: error.message,
+        user: user?.uid,
+        location: location
+      });
+      
+      // Provide specific error messages
+      if (error.code === 'permission-denied') {
+        alert('Permission denied. Please check Firebase security rules.');
+      } else if (error.code === 'unavailable') {
+        alert('Database temporarily unavailable. Please check your internet connection.');
+      } else {
+        alert(`Failed to record speed bump: ${error.message}`);
       }
     }
-  }, [location, direction, speed, getCompassDirection, geocollection, autoRefresh, loadNearbySpeedBumps]);
+  }, [location, direction, speed, getCompassDirection, user, username, autoRefresh, loadNearbySpeedBumps]);
 
-  // Check if we need to update the query based on location change
+  // Check if we need to update the query based on location change and cooldown
   const shouldUpdateQuery = useCallback((currentLat, currentLng, lastLat, lastLng) => {
     if (!lastLat || !lastLng) return true;
     
+    // Check cooldown period
+    const now = Date.now();
+    if (now - lastQueryTime < QUERY_COOLDOWN) {
+      return false;
+    }
+    
     const distance = calculateDistance(currentLat, currentLng, lastLat, lastLng);
     return distance > (QUERY_UPDATE_THRESHOLD * 1000); // Convert km to meters
-  }, [calculateDistance, QUERY_UPDATE_THRESHOLD]);
+  }, [calculateDistance, QUERY_UPDATE_THRESHOLD, lastQueryTime, QUERY_COOLDOWN]);
 
-  // Load speed bumps when location changes significantly
+  // Debounced location effect to prevent excessive queries
   useEffect(() => {
-    if (location.latitude && location.longitude) {
-      if (shouldUpdateQuery(
-        location.latitude, 
-        location.longitude, 
-        lastQueryLocation?.latitude, 
-        lastQueryLocation?.longitude
-      )) {
-        const unsubscribe = loadNearbySpeedBumps(location.latitude, location.longitude);
+    let timeoutId;
+    
+    if (location.latitude && location.longitude && autoRefresh) {
+      // Debounce location updates
+      timeoutId = setTimeout(() => {
+        if (shouldUpdateQuery(
+          location.latitude, 
+          location.longitude, 
+          lastQueryLocation?.latitude, 
+          lastQueryLocation?.longitude
+        )) {
+          console.log('Location changed significantly, updating speed bumps query...');
+          const loadData = async () => {
+            const unsubscribe = await loadNearbySpeedBumps(location.latitude, location.longitude);
+            if (unsubscribe) {
+              setLastQueryLocation({ 
+                latitude: location.latitude, 
+                longitude: location.longitude 
+              });
+            }
+          };
+          
+          loadData();
+        }
+      }, LOCATION_DEBOUNCE);
+    }
+    
+    // Cleanup timeout
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [location.latitude, location.longitude, lastQueryLocation, shouldUpdateQuery, loadNearbySpeedBumps, autoRefresh, LOCATION_DEBOUNCE]);
+
+  // Initial load when GPS first locks
+  useEffect(() => {
+    if (location.latitude && location.longitude && !lastQueryLocation && !isLoadingSpeedBumps) {
+      console.log('Initial GPS lock, loading speed bumps...');
+      const loadInitialData = async () => {
+        await loadNearbySpeedBumps(location.latitude, location.longitude);
         setLastQueryLocation({ 
           latitude: location.latitude, 
           longitude: location.longitude 
         });
-        
-        return unsubscribe;
-      }
+      };
+      
+      loadInitialData();
     }
-  }, [location.latitude, location.longitude, lastQueryLocation, shouldUpdateQuery, loadNearbySpeedBumps]);
+  }, [location.latitude, location.longitude, lastQueryLocation, isLoadingSpeedBumps, loadNearbySpeedBumps]);
+
+  // Cleanup active subscription on component unmount
+  useEffect(() => {
+    return () => {
+      if (activeQueryUnsubscribe && typeof activeQueryUnsubscribe === 'function') {
+        console.log('Component unmounting, cleaning up speed bumps subscription');
+        activeQueryUnsubscribe();
+      }
+    };
+  }, [activeQueryUnsubscribe]);
+
+  // Initialize tracking on component mount
+  useEffect(() => {
+    const cleanup = startTracking();
+    return () => {
+      if (cleanup && typeof cleanup === 'function') {
+        cleanup();
+      }
+    };
+  }, [startTracking]);
 
   // Find nearby speed bumps
   useEffect(() => {
@@ -267,8 +491,33 @@ function App() {
     return cleanup;
   }, [startTracking]);
 
-  return (
+    return (
     <div className="App">
+      {isAuthenticating && (
+        <div className="auth-overlay">
+          <div className="auth-message">
+            🔐 Authenticating user...
+          </div>
+        </div>
+      )}
+
+      {!user && !isAuthenticating && (
+        <div className="auth-overlay">
+          <div className="auth-container">
+            <h3>🚗 GPS Obstacle Tracker</h3>
+            <p>Please sign in to record and track speed bumps</p>
+            <div className="auth-buttons">
+              <button onClick={signInWithGoogle} className="google-signin-btn">
+                🔍 Sign in with Google
+              </button>
+              <button onClick={signInAnonymouslyHandler} className="anonymous-signin-btn">
+                👤 Continue as Guest
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* Speed Bumps Area - Top */}
       <div className="speed-bumps-area">
         <div className="speed-bumps-header">
@@ -281,16 +530,45 @@ function App() {
               {autoRefresh ? '🔄 Auto' : '⏸️ Manual'}
             </button>
             <button 
-              onClick={() => location.latitude && location.longitude && 
-                loadNearbySpeedBumps(location.latitude, location.longitude)} 
+              onClick={() => {
+                if (location.latitude && location.longitude) {
+                  const now = Date.now();
+                  if (now - lastQueryTime >= QUERY_COOLDOWN) {
+                    loadNearbySpeedBumps(location.latitude, location.longitude);
+                  } else {
+                    const remainingTime = Math.ceil((QUERY_COOLDOWN - (now - lastQueryTime)) / 1000);
+                    alert(`Please wait ${remainingTime} more seconds before refreshing.`);
+                  }
+                }
+              }} 
               className="refresh-btn"
               disabled={isLoadingSpeedBumps || !location.latitude}
             >
               {isLoadingSpeedBumps ? '🔄 Loading...' : '🔍 Refresh'}
             </button>
-            <button onClick={recordSpeedBump} className="record-speed-bump-btn">
+            <button 
+              onClick={recordSpeedBump} 
+              className="record-speed-bump-btn"
+              disabled={!user || !location.latitude || isAuthenticating}
+            >
               🚧 Mark Speed Bump
             </button>
+          </div>
+        </div>
+        
+        <div className="user-info">
+          <div className="user-status">
+            <div className="user-details">
+              👤 User: {username || 'Not signed in'}
+              <span className="user-auth-status">
+                {user ? '🟢 Connected' : '🔴 Not authenticated'}
+              </span>
+            </div>
+            {user && (
+              <button onClick={handleSignOut} className="signout-btn">
+                🚪 Sign Out
+              </button>
+            )}
           </div>
         </div>
         
@@ -302,10 +580,16 @@ function App() {
                 📍 Query center: {lastQueryLocation.latitude.toFixed(4)}, {lastQueryLocation.longitude.toFixed(4)}
               </span>
             )}
+            {lastQueryTime > 0 && (
+              <span className="query-time">
+                🕐 Last update: {Math.floor((Date.now() - lastQueryTime) / 1000)}s ago
+                {Date.now() - lastQueryTime < QUERY_COOLDOWN && (
+                  <span className="cooldown"> (Cooldown: {Math.ceil((QUERY_COOLDOWN - (Date.now() - lastQueryTime)) / 1000)}s)</span>
+                )}
+              </span>
+            )}
           </div>
-        </div>
-        
-        <div className="nearby-speed-bumps">
+        </div>        <div className="nearby-speed-bumps">
           {isLoadingSpeedBumps ? (
             <div className="loading-speed-bumps">
               <div className="loading-spinner">🔄</div>
@@ -331,6 +615,9 @@ function App() {
                     }
                   </div>
                   <div className="bump-speed">Safe speed: {Math.round(bump.speed)} km/h</div>
+                  <div className="bump-reporter">
+                    👤 Reported by: {bump.username || `User_${bump.userId?.slice(-8)}` || 'Unknown'}
+                  </div>
                 </div>
               );
             })

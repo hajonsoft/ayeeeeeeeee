@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        canvas { border: 1px solid #ccc; }
+    </style>
+</head>
+<body>
+    <canvas id="faviconCanvas" width="32" height="32"></canvas>
+    <script>
+        const canvas = document.getElementById('faviconCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Background
+        ctx.fillStyle = '#4ECDC4';
+        ctx.fillRect(0, 0, 32, 32);
+        
+        // Car emoji style
+        ctx.fillStyle = '#2C3E50';
+        ctx.fillRect(4, 12, 24, 8);
+        ctx.fillRect(8, 8, 16, 6);
+        
+        // Wheels
+        ctx.beginPath();
+        ctx.arc(10, 22, 3, 0, 2 * Math.PI);
+        ctx.arc(22, 22, 3, 0, 2 * Math.PI);
+        ctx.fillStyle = '#34495E';
+        ctx.fill();
+        
+        // Warning indicator
+        ctx.fillStyle = '#FF6B6B';
+        ctx.fillRect(26, 6, 4, 2);
+        
+        console.log('Favicon drawn on canvas');
+    </script>
+</body>
+</html>

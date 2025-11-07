@@ -246,6 +246,72 @@
   box-shadow: 0 4px 15px rgba(78, 205, 196, 0.3);
 }
 
+.toggle-user-info-btn {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 8px 15px;
+  border-radius: 20px;
+  font-size: 0.9em;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+  backdrop-filter: blur(5px);
+}
+
+.toggle-user-info-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateY(-2px);
+}
+
+.speed-bump-recorder {
+  margin: 20px 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.large-record-speed-bump-btn {
+  background: linear-gradient(45deg, #FF6B6B, #FF8E53);
+  color: white;
+  border: none;
+  padding: 25px 50px;
+  border-radius: 50px;
+  font-size: 1.8em;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 8px 25px rgba(255, 107, 107, 0.4);
+  white-space: nowrap;
+  min-height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 600px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.large-record-speed-bump-btn:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 35px rgba(255, 107, 107, 0.5);
+}
+
+.large-record-speed-bump-btn:disabled {
+  background: linear-gradient(45deg, #666, #888);
+  cursor: not-allowed;
+  opacity: 0.7;
+  transform: none;
+  box-shadow: 0 4px 15px rgba(102, 102, 102, 0.3);
+}
+
+.large-record-speed-bump-btn:active {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(255, 107, 107, 0.6);
+}
+
 .record-speed-bump-btn {
   background: linear-gradient(45deg, #FF6B6B, #FF8E53);
   color: white;
@@ -375,6 +441,112 @@
   align-items: center;
   padding: 0 20px;
   box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.car-dashboard.clickable-dashboard {
+  user-select: none;
+  transition: all 0.3s ease;
+}
+
+.car-dashboard.clickable-dashboard:hover {
+  background: linear-gradient(135deg, #34495e, #2c3e50);
+  transform: translateY(-2px);
+  box-shadow: 0 -6px 25px rgba(0, 0, 0, 0.4);
+}
+
+.car-dashboard.clickable-dashboard:active {
+  transform: translateY(0);
+  background: linear-gradient(135deg, #1a252f, #2c3e50);
+}
+
+.car-dashboard.recording {
+  background: linear-gradient(135deg, #27ae60, #2ecc71);
+  border-top-color: #27ae60;
+  animation: recordingPulse 1s ease-in-out infinite;
+}
+
+@keyframes recordingPulse {
+  0%, 100% {
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+  }
+  50% {
+    box-shadow: 0 -8px 30px rgba(39, 174, 96, 0.5);
+  }
+}
+
+.dashboard-action-indicator {
+  position: absolute;
+  top: 10px;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9em;
+  font-weight: bold;
+  z-index: 10;
+}
+
+.recording-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: white;
+  background: rgba(39, 174, 96, 0.2);
+  padding: 8px 15px;
+  border-radius: 20px;
+  backdrop-filter: blur(5px);
+}
+
+.recording-pulse {
+  font-size: 1.2em;
+  animation: spin 1s linear infinite;
+}
+
+.recording-text {
+  font-size: 0.85em;
+  letter-spacing: 0.5px;
+}
+
+.tap-indicator {
+  color: #FF6B6B;
+  background: rgba(255, 107, 107, 0.15);
+  padding: 8px 15px;
+  border-radius: 20px;
+  backdrop-filter: blur(5px);
+  animation: tapPulse 2s ease-in-out infinite;
+  border: 1px solid rgba(255, 107, 107, 0.3);
+}
+
+.tap-text {
+  font-size: 0.85em;
+  letter-spacing: 0.5px;
+}
+
+@keyframes tapPulse {
+  0%, 100% {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.02);
+  }
+}
+
+.waiting-gps {
+  color: #95A5A6;
+  background: rgba(149, 165, 166, 0.15);
+  padding: 8px 15px;
+  border-radius: 20px;
+  backdrop-filter: blur(5px);
+  border: 1px solid rgba(149, 165, 166, 0.3);
+}
+
+.waiting-text {
+  font-size: 0.85em;
+  letter-spacing: 0.5px;
 }
 
 .car-icon-section {
@@ -480,6 +652,22 @@
     font-size: 1em;
   }
   
+  .large-record-speed-bump-btn {
+    padding: 20px 40px;
+    font-size: 1.5em;
+    min-height: 70px;
+    letter-spacing: 1px;
+  }
+  
+  .speed-bump-recorder {
+    margin: 15px 0;
+  }
+
+  .toggle-user-info-btn {
+    padding: 8px 12px;
+    font-size: 0.85em;
+  }
+  
   .query-info {
     padding: 12px;
     margin-bottom: 15px;
@@ -492,6 +680,21 @@
   .car-dashboard {
     height: 140px;
     padding: 15px;
+  }
+  
+  .dashboard-action-indicator {
+    position: static;
+    margin-top: 10px;
+    justify-content: center;
+  }
+  
+  .tap-indicator, .recording-indicator, .waiting-gps {
+    padding: 10px 20px;
+    font-size: 0.9em;
+  }
+  
+  .tap-text, .recording-text, .waiting-text {
+    font-size: 0.9em;
   }
   
   .car-icon-section {
@@ -551,6 +754,22 @@
     font-size: 0.9em;
   }
   
+  .large-record-speed-bump-btn {
+    padding: 15px 30px;
+    font-size: 1.3em;
+    min-height: 60px;
+    letter-spacing: 1px;
+  }
+  
+  .speed-bump-recorder {
+    margin: 10px 0;
+  }
+
+  .toggle-user-info-btn {
+    padding: 6px 10px;
+    font-size: 0.8em;
+  }
+  
   .query-info {
     padding: 10px;
     margin-bottom: 15px;
@@ -563,6 +782,20 @@
   .car-dashboard {
     height: 100px;
     padding: 0 25px;
+  }
+  
+  .dashboard-action-indicator {
+    top: 8px;
+    right: 15px;
+  }
+  
+  .tap-indicator, .recording-indicator, .waiting-gps {
+    padding: 6px 12px;
+    font-size: 0.8em;
+  }
+  
+  .tap-text, .recording-text, .waiting-text {
+    font-size: 0.75em;
   }
   
   .car-icon-section {
@@ -595,6 +828,20 @@
     padding: 0 40px;
   }
   
+  .dashboard-action-indicator {
+    top: 15px;
+    right: 30px;
+  }
+  
+  .tap-indicator, .recording-indicator, .waiting-gps {
+    padding: 12px 20px;
+    font-size: 1em;
+  }
+  
+  .tap-text, .recording-text, .waiting-text {
+    font-size: 0.95em;
+  }
+  
   .car-icon-section {
     margin-right: 40px;
     min-width: 100px;
@@ -615,6 +862,22 @@
   
   .speed-bumps-header h3 {
     font-size: 1.8em;
+  }
+  
+  .large-record-speed-bump-btn {
+    padding: 30px 60px;
+    font-size: 2em;
+    min-height: 90px;
+    letter-spacing: 2px;
+  }
+  
+  .speed-bump-recorder {
+    margin: 25px 0;
+  }
+
+  .toggle-user-info-btn {
+    padding: 10px 18px;
+    font-size: 1em;
   }
 }
 

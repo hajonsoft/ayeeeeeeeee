@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { collection, addDoc, query, where, onSnapshot } from 'firebase/firestore';
-import { signInWithPopup, GoogleAuthProvider, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
+import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from 'firebase/auth';
 import { db, auth } from './firebase';
 import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
 import './App.css';
@@ -26,6 +26,8 @@ function App() {
   const [user, setUser] = useState(null);
   const [isAuthenticating, setIsAuthenticating] = useState(true);
   const [username, setUsername] = useState('');
+  const [isUserInfoVisible, setIsUserInfoVisible] = useState(false);
+  const [isRecordingSpeedBump, setIsRecordingSpeedBump] = useState(false);
 
   const NEARBY_DISTANCE = 500; // meters - for display
   const QUERY_RADIUS = 50; // kilometers - for database query
@@ -107,19 +109,6 @@ function App() {
       if (error.code !== 'auth/popup-closed-by-user') {
         alert('Failed to sign in with Google. Please try again.');
       }
-    }
-  }, []);
-
-  // Anonymous Sign In
-  const signInAnonymouslyHandler = useCallback(async () => {
-    try {
-      setIsAuthenticating(true);
-      await signInAnonymously(auth);
-      console.log('Anonymous sign-in successful');
-    } catch (error) {
-      console.error('Anonymous sign-in error:', error);
-      setIsAuthenticating(false);
-      alert('Failed to sign in anonymously. Please try again.');
     }
   }, []);
 
@@ -304,16 +293,20 @@ function App() {
   // Record speed bump to Firebase with user information
   const recordSpeedBump = useCallback(async () => {
     if (!location.latitude || !location.longitude) {
-      alert('GPS location not available. Please wait for GPS lock.');
-      return;
+      return; // Silently fail if no GPS
     }
 
     if (!user) {
-      alert('Authentication required. Please wait a moment and try again.');
-      return;
+      return; // Silently fail if no user
+    }
+
+    if (isRecordingSpeedBump) {
+      return; // Prevent double-clicks
     }
 
     try {
+      setIsRecordingSpeedBump(true);
+      
       console.log('Recording speed bump...', {
         latitude: location.latitude,
         longitude: location.longitude,
@@ -345,7 +338,6 @@ function App() {
       const docRef = await addDoc(collection(db, 'speedBumps'), speedBump);
       
       console.log('Speed bump recorded successfully with ID:', docRef.id);
-      alert(`Speed bump recorded successfully!\nID: ${docRef.id}\nUser: ${username}`);
       
       // Refresh nearby speed bumps if auto-refresh is enabled
       if (autoRefresh) {
@@ -359,17 +351,10 @@ function App() {
         user: user?.uid,
         location: location
       });
-      
-      // Provide specific error messages
-      if (error.code === 'permission-denied') {
-        alert('Permission denied. Please check Firebase security rules.');
-      } else if (error.code === 'unavailable') {
-        alert('Database temporarily unavailable. Please check your internet connection.');
-      } else {
-        alert(`Failed to record speed bump: ${error.message}`);
-      }
+    } finally {
+      setIsRecordingSpeedBump(false);
     }
-  }, [location, direction, speed, getCompassDirection, user, username, autoRefresh, loadNearbySpeedBumps]);
+  }, [location, direction, speed, getCompassDirection, user, username, autoRefresh, loadNearbySpeedBumps, isRecordingSpeedBump]);
 
   // Check if we need to update the query based on location change and cooldown
   const shouldUpdateQuery = useCallback((currentLat, currentLng, lastLat, lastLng) => {
@@ -505,13 +490,10 @@ function App() {
         <div className="auth-overlay">
           <div className="auth-container">
             <h3>🚗 GPS Obstacle Tracker</h3>
-            <p>Please sign in to record and track speed bumps</p>
+            <p>Sign in with Google to record and track speed bumps</p>
             <div className="auth-buttons">
               <button onClick={signInWithGoogle} className="google-signin-btn">
                 🔍 Sign in with Google
-              </button>
-              <button onClick={signInAnonymouslyHandler} className="anonymous-signin-btn">
-                👤 Continue as Guest
               </button>
             </div>
           </div>
@@ -535,9 +517,6 @@ function App() {
                   const now = Date.now();
                   if (now - lastQueryTime >= QUERY_COOLDOWN) {
                     loadNearbySpeedBumps(location.latitude, location.longitude);
-                  } else {
-                    const remainingTime = Math.ceil((QUERY_COOLDOWN - (now - lastQueryTime)) / 1000);
-                    alert(`Please wait ${remainingTime} more seconds before refreshing.`);
                   }
                 }
               }} 
@@ -546,31 +525,35 @@ function App() {
             >
               {isLoadingSpeedBumps ? '🔄 Loading...' : '🔍 Refresh'}
             </button>
-            <button 
-              onClick={recordSpeedBump} 
-              className="record-speed-bump-btn"
-              disabled={!user || !location.latitude || isAuthenticating}
-            >
-              🚧 Mark Speed Bump
-            </button>
-          </div>
-        </div>
-        
-        <div className="user-info">
-          <div className="user-status">
-            <div className="user-details">
-              👤 User: {username || 'Not signed in'}
-              <span className="user-auth-status">
-                {user ? '🟢 Connected' : '🔴 Not authenticated'}
-              </span>
-            </div>
             {user && (
-              <button onClick={handleSignOut} className="signout-btn">
-                🚪 Sign Out
+              <button 
+                onClick={() => setIsUserInfoVisible(!isUserInfoVisible)} 
+                className="toggle-user-info-btn"
+              >
+                {isUserInfoVisible ? '👤 Hide' : '👤 Info'}
               </button>
             )}
           </div>
         </div>
+        
+
+        
+        {/* User Info - Only show when toggled visible */}
+        {user && isUserInfoVisible && (
+          <div className="user-info">
+            <div className="user-status">
+              <div className="user-details">
+                👤 User: {username || 'Loading...'}
+                <span className="user-auth-status">
+                  🟢 Connected
+                </span>
+              </div>
+              <button onClick={handleSignOut} className="signout-btn">
+                🚪 Sign Out
+              </button>
+            </div>
+          </div>
+        )}
         
         <div className="query-info">
           <div className="query-stats">
@@ -630,7 +613,11 @@ function App() {
       </div>
 
       {/* Car Dashboard - Bottom */}
-      <div className="car-dashboard">
+      <div 
+        className={`car-dashboard ${user ? 'clickable-dashboard' : ''} ${isRecordingSpeedBump ? 'recording' : ''}`}
+        onClick={user && !isRecordingSpeedBump && location.latitude ? recordSpeedBump : undefined}
+        style={{ cursor: user && !isRecordingSpeedBump && location.latitude ? 'pointer' : 'default' }}
+      >
         <div className="car-icon-section">
           <DirectionsCarIcon className="car-icon" />
           <div className={`gps-status ${isTracking ? 'active' : 'inactive'}`}>
@@ -662,6 +649,22 @@ function App() {
             </div>
           </div>
         </div>
+        
+        {/* Speed Bump Recording Indicator */}
+        {user && (
+          <div className="dashboard-action-indicator">
+            {isRecordingSpeedBump ? (
+              <div className="recording-indicator">
+                <div className="recording-pulse">🔄</div>
+                <div className="recording-text">Recording...</div>
+              </div>
+            ) : !location.latitude ? (
+              <div className="waiting-gps">
+                <div className="waiting-text">📍 Waiting for GPS...</div>
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
     </div>
   );

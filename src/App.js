@@ -1,4 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { GeoPoint } from 'firebase/firestore';
+import { db } from './firebase';
+import { GeoFirestore } from 'geofirestore';
+import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
 import './App.css';
 
 function App() {
@@ -9,15 +13,22 @@ function App() {
   });
   const [speed, setSpeed] = useState(0);
   const [direction, setDirection] = useState(0);
-  const [speedHistory, setSpeedHistory] = useState([]);
   const [previousLocation, setPreviousLocation] = useState(null);
   const [speedBumps, setSpeedBumps] = useState([]);
-  const [scannedRoads, setScannedRoads] = useState([]);
-  const [showSpeedBumpButton, setShowSpeedBumpButton] = useState(false);
+  const [nearbySpeedBumps, setNearbySpeedBumps] = useState([]);
   const [isTracking, setIsTracking] = useState(false);
+  const [lastUpdateTime, setLastUpdateTime] = useState(Date.now());
+  const [lastQueryLocation, setLastQueryLocation] = useState(null);
+  const [isLoadingSpeedBumps, setIsLoadingSpeedBumps] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
 
-  // Speed bump detection threshold (km/h)
-  const SPEED_BUMP_THRESHOLD = 20;
+  const NEARBY_DISTANCE = 500; // meters - for display
+  const QUERY_RADIUS = 50; // kilometers - for database query
+  const QUERY_UPDATE_THRESHOLD = 10; // kilometers - when to refresh query
+
+  // Initialize GeoFirestore
+  const geofirestore = new GeoFirestore(db);
+  const geocollection = geofirestore.collection('speedBumps');
 
   // Calculate distance between two coordinates using Haversine formula
   const calculateDistance = useCallback((lat1, lon1, lat2, lon2) => {
@@ -46,13 +57,6 @@ function App() {
     return (bearing + 360) % 360; // Normalize to 0-360 degrees
   }, []);
 
-  // Calculate speed from distance and time
-  const calculateSpeed = useCallback((distance, timeInterval) => {
-    // Speed in m/s, convert to km/h
-    const speedMPS = distance / (timeInterval / 1000);
-    return speedMPS * 3.6; // Convert m/s to km/h
-  }, []);
-
   // Get compass direction from bearing
   const getCompassDirection = useCallback((bearing) => {
     const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
@@ -60,14 +64,19 @@ function App() {
     return directions[index];
   }, []);
 
-  // Handle new position data
+  // Handle new position data with improved speed calculation
   const handlePositionUpdate = useCallback((position) => {
-    const { latitude, longitude, accuracy } = position.coords;
+    const { latitude, longitude, accuracy, speed: gpsSpeed } = position.coords;
     const currentTime = Date.now();
     
     setLocation({ latitude, longitude, accuracy });
 
-    if (previousLocation) {
+    // Use GPS speed if available, otherwise calculate from distance
+    let calculatedSpeed = 0;
+    
+    if (gpsSpeed !== null && gpsSpeed !== undefined && gpsSpeed >= 0) {
+      calculatedSpeed = gpsSpeed * 3.6; // Convert m/s to km/h
+    } else if (previousLocation && currentTime - lastUpdateTime > 500) { // Update every 500ms minimum
       const distance = calculateDistance(
         previousLocation.latitude,
         previousLocation.longitude,
@@ -75,44 +84,42 @@ function App() {
         longitude
       );
       
-      const timeInterval = currentTime - previousLocation.timestamp;
+      const timeInterval = currentTime - lastUpdateTime;
       
-      // Only calculate speed if we moved significantly and time elapsed
-      if (distance > 1 && timeInterval > 1000) { // Moved at least 1m and 1s elapsed
-        const newSpeed = calculateSpeed(distance, timeInterval);
-        const newDirection = calculateBearing(
-          previousLocation.latitude,
-          previousLocation.longitude,
-          latitude,
-          longitude
-        );
-        
-        setSpeed(newSpeed);
-        setDirection(newDirection);
-        
-        // Update speed history for speed bump detection
-        setSpeedHistory(prev => {
-          const newHistory = [...prev, newSpeed].slice(-10); // Keep last 10 readings
-          
-          // Check for potential speed bump (sudden speed reduction)
-          if (newHistory.length >= 3) {
-            const recentSpeeds = newHistory.slice(-3);
-            const avgSpeed = recentSpeeds.reduce((a, b) => a + b, 0) / recentSpeeds.length;
-            
-            if (avgSpeed < SPEED_BUMP_THRESHOLD && newSpeed < 15) {
-              setShowSpeedBumpButton(true);
-            }
-          }
-          
-          return newHistory;
-        });
+      // Only calculate if moved significantly
+      if (distance > 0.5 && timeInterval > 500) { // Moved at least 0.5m
+        const speedMPS = distance / (timeInterval / 1000);
+        calculatedSpeed = Math.max(0, speedMPS * 3.6); // Convert to km/h, ensure non-negative
+      } else {
+        calculatedSpeed = speed; // Keep previous speed if no significant movement
       }
+    }
+
+    // Smooth speed calculation to reduce noise
+    setSpeed(prevSpeed => {
+      const smoothedSpeed = prevSpeed * 0.7 + calculatedSpeed * 0.3;
+      return Math.max(0, smoothedSpeed);
+    });
+
+    if (previousLocation && currentTime - lastUpdateTime > 500) {
+      const newDirection = calculateBearing(
+        previousLocation.latitude,
+        previousLocation.longitude,
+        latitude,
+        longitude
+      );
+      
+      if (!isNaN(newDirection)) {
+        setDirection(newDirection);
+      }
+      
+      setLastUpdateTime(currentTime);
     }
     
     setPreviousLocation({ latitude, longitude, timestamp: currentTime });
-  }, [previousLocation, calculateDistance, calculateSpeed, calculateBearing]);
+  }, [previousLocation, lastUpdateTime, speed, calculateDistance, calculateBearing]);
 
-  // Start GPS tracking
+  // Start GPS tracking with higher frequency
   const startTracking = useCallback(() => {
     if (navigator.geolocation) {
       setIsTracking(true);
@@ -124,8 +131,8 @@ function App() {
         },
         {
           enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 1000
+          timeout: 5000,
+          maximumAge: 0 // Always get fresh position
         }
       );
       
@@ -135,36 +142,124 @@ function App() {
     }
   }, [handlePositionUpdate]);
 
-  // Record speed bump
-  const recordSpeedBump = useCallback(() => {
-    if (location.latitude && location.longitude) {
-      const speedBump = {
-        id: Date.now(),
-        latitude: location.latitude,
-        longitude: location.longitude,
-        direction: direction,
-        safeSpeed: Math.max(...speedHistory.slice(-5)), // Max speed in last 5 readings
-        timestamp: new Date().toISOString(),
-        compassDirection: getCompassDirection(direction)
-      };
-      
-      setSpeedBumps(prev => [...prev, speedBump]);
-      setShowSpeedBumpButton(false);
-      
-      // Mark this road segment as scanned
-      const roadSegment = {
-        id: Date.now(),
-        startLat: location.latitude,
-        startLon: location.longitude,
-        direction: direction,
-        timestamp: new Date().toISOString()
-      };
-      
-      setScannedRoads(prev => [...prev, roadSegment]);
-      
-      alert('Speed bump recorded successfully!');
+  // Load nearby speed bumps using geospatial query
+  const loadNearbySpeedBumps = useCallback(async (lat, lng, radius = QUERY_RADIUS) => {
+    if (!lat || !lng) return;
+    
+    setIsLoadingSpeedBumps(true);
+    try {
+      // Create geospatial query
+      const geoQuery = geocollection.near({
+        center: new GeoPoint(lat, lng),
+        radius: radius
+      });
+
+      // Execute query and listen for updates
+      const unsubscribe = geoQuery.onSnapshot((snapshot) => {
+        const bumps = [];
+        snapshot.forEach((doc) => {
+          bumps.push({
+            id: doc.id,
+            ...doc.data()
+          });
+        });
+        
+        setSpeedBumps(bumps);
+        setIsLoadingSpeedBumps(false);
+      });
+
+      return unsubscribe;
+    } catch (error) {
+      console.error('Error loading nearby speed bumps:', error);
+      setIsLoadingSpeedBumps(false);
     }
-  }, [location, direction, speedHistory, getCompassDirection]);
+  }, [geocollection, QUERY_RADIUS]);
+
+  // Record speed bump to Firebase with geolocation data
+  const recordSpeedBump = useCallback(async () => {
+    if (location.latitude && location.longitude) {
+      try {
+        const speedBump = {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          direction: direction,
+          speed: speed,
+          compassDirection: getCompassDirection(direction),
+          timestamp: new Date(),
+          accuracy: location.accuracy || 0,
+          // Add coordinates field for geofirestore
+          coordinates: new GeoPoint(location.latitude, location.longitude)
+        };
+        
+        // Use geofirestore to add with geospatial indexing
+        await geocollection.add(speedBump);
+        alert('Speed bump recorded successfully!');
+        
+        // Refresh nearby speed bumps if auto-refresh is enabled
+        if (autoRefresh) {
+          loadNearbySpeedBumps(location.latitude, location.longitude);
+        }
+      } catch (error) {
+        console.error('Error recording speed bump:', error);
+        alert('Failed to record speed bump. Please try again.');
+      }
+    }
+  }, [location, direction, speed, getCompassDirection, geocollection, autoRefresh, loadNearbySpeedBumps]);
+
+  // Check if we need to update the query based on location change
+  const shouldUpdateQuery = useCallback((currentLat, currentLng, lastLat, lastLng) => {
+    if (!lastLat || !lastLng) return true;
+    
+    const distance = calculateDistance(currentLat, currentLng, lastLat, lastLng);
+    return distance > (QUERY_UPDATE_THRESHOLD * 1000); // Convert km to meters
+  }, [calculateDistance, QUERY_UPDATE_THRESHOLD]);
+
+  // Load speed bumps when location changes significantly
+  useEffect(() => {
+    if (location.latitude && location.longitude) {
+      if (shouldUpdateQuery(
+        location.latitude, 
+        location.longitude, 
+        lastQueryLocation?.latitude, 
+        lastQueryLocation?.longitude
+      )) {
+        const unsubscribe = loadNearbySpeedBumps(location.latitude, location.longitude);
+        setLastQueryLocation({ 
+          latitude: location.latitude, 
+          longitude: location.longitude 
+        });
+        
+        return unsubscribe;
+      }
+    }
+  }, [location.latitude, location.longitude, lastQueryLocation, shouldUpdateQuery, loadNearbySpeedBumps]);
+
+  // Find nearby speed bumps
+  useEffect(() => {
+    if (location.latitude && location.longitude) {
+      const nearby = speedBumps.filter(bump => {
+        const distance = calculateDistance(
+          location.latitude,
+          location.longitude,
+          bump.latitude,
+          bump.longitude
+        );
+        return distance <= NEARBY_DISTANCE;
+      }).sort((a, b) => {
+        const distanceA = calculateDistance(location.latitude, location.longitude, a.latitude, a.longitude);
+        const distanceB = calculateDistance(location.latitude, location.longitude, b.latitude, b.longitude);
+        return distanceA - distanceB;
+      });
+      
+      setNearbySpeedBumps(nearby);
+    }
+  }, [location, speedBumps, calculateDistance]);
+
+  // Check direction similarity
+  const isDirectionSimilar = useCallback((dir1, dir2, tolerance = 45) => {
+    const diff = Math.abs(dir1 - dir2);
+    return diff <= tolerance || diff >= (360 - tolerance);
+  }, []);
 
   // Initialize tracking on component mount
   useEffect(() => {
@@ -174,93 +269,111 @@ function App() {
 
   return (
     <div className="App">
-      <div className="gps-dashboard">
-        <h1>GPS Obstacle Tracker</h1>
-        
-        {/* GPS Status */}
-        <div className="status-panel">
-          <div className={`status-indicator ${isTracking ? 'active' : 'inactive'}`}>
-            {isTracking ? '📡 GPS Active' : '📡 GPS Inactive'}
-          </div>
-        </div>
-
-        {/* Navigation Arrow */}
-        <div className="navigation-panel">
-          <div 
-            className="direction-arrow" 
-            style={{ transform: `rotate(${direction}deg)` }}
-          >
-            ↑
-          </div>
-          <div className="compass-direction">
-            {getCompassDirection(direction)}
-          </div>
-        </div>
-
-        {/* Location Data */}
-        <div className="data-panel">
-          <div className="data-row">
-            <label>Latitude:</label>
-            <span>{location.latitude ? location.latitude.toFixed(6) : 'Waiting...'}</span>
-          </div>
-          <div className="data-row">
-            <label>Longitude:</label>
-            <span>{location.longitude ? location.longitude.toFixed(6) : 'Waiting...'}</span>
-          </div>
-          <div className="data-row">
-            <label>Speed:</label>
-            <span>{speed.toFixed(1)} km/h</span>
-          </div>
-          <div className="data-row">
-            <label>Direction:</label>
-            <span>{direction.toFixed(0)}° ({getCompassDirection(direction)})</span>
-          </div>
-          <div className="data-row">
-            <label>Accuracy:</label>
-            <span>{location.accuracy ? `${location.accuracy.toFixed(0)}m` : 'N/A'}</span>
-          </div>
-        </div>
-
-        {/* Speed Bump Detection */}
-        {showSpeedBumpButton && (
-          <div className="speed-bump-alert">
-            <p>⚠️ Slow speed detected! Possible speed bump?</p>
-            <button onClick={recordSpeedBump} className="record-button">
-              Mark Speed Bump
+      {/* Speed Bumps Area - Top */}
+      <div className="speed-bumps-area">
+        <div className="speed-bumps-header">
+          <h3>Upcoming Speed Bumps</h3>
+          <div className="header-buttons">
+            <button 
+              onClick={() => setAutoRefresh(!autoRefresh)} 
+              className={`auto-refresh-btn ${autoRefresh ? 'active' : 'inactive'}`}
+            >
+              {autoRefresh ? '🔄 Auto' : '⏸️ Manual'}
             </button>
             <button 
-              onClick={() => setShowSpeedBumpButton(false)} 
-              className="dismiss-button"
+              onClick={() => location.latitude && location.longitude && 
+                loadNearbySpeedBumps(location.latitude, location.longitude)} 
+              className="refresh-btn"
+              disabled={isLoadingSpeedBumps || !location.latitude}
             >
-              Dismiss
+              {isLoadingSpeedBumps ? '🔄 Loading...' : '🔍 Refresh'}
+            </button>
+            <button onClick={recordSpeedBump} className="record-speed-bump-btn">
+              🚧 Mark Speed Bump
             </button>
           </div>
-        )}
-
-        {/* Recorded Speed Bumps */}
-        <div className="speed-bumps-panel">
-          <h3>Recorded Speed Bumps ({speedBumps.length})</h3>
-          <div className="speed-bumps-list">
-            {speedBumps.slice(-5).map(bump => (
-              <div key={bump.id} className="speed-bump-item">
-                <div className="bump-location">
-                  📍 {bump.latitude.toFixed(6)}, {bump.longitude.toFixed(6)}
-                </div>
-                <div className="bump-details">
-                  Direction: {bump.compassDirection} | Safe Speed: {bump.safeSpeed.toFixed(1)} km/h
-                </div>
-                <div className="bump-time">
-                  {new Date(bump.timestamp).toLocaleTimeString()}
-                </div>
-              </div>
-            ))}
+        </div>
+        
+        <div className="query-info">
+          <div className="query-stats">
+            📊 Loaded: {speedBumps.length} speed bumps within {QUERY_RADIUS}km
+            {lastQueryLocation && (
+              <span className="query-location">
+                📍 Query center: {lastQueryLocation.latitude.toFixed(4)}, {lastQueryLocation.longitude.toFixed(4)}
+              </span>
+            )}
           </div>
         </div>
+        
+        <div className="nearby-speed-bumps">
+          {isLoadingSpeedBumps ? (
+            <div className="loading-speed-bumps">
+              <div className="loading-spinner">🔄</div>
+              <p>Loading nearby speed bumps...</p>
+            </div>
+          ) : nearbySpeedBumps.length > 0 ? (
+            nearbySpeedBumps.slice(0, 3).map(bump => {
+              const distance = calculateDistance(
+                location.latitude || 0,
+                location.longitude || 0,
+                bump.latitude,
+                bump.longitude
+              );
+              const isSameDirection = isDirectionSimilar(direction, bump.direction);
+              
+              return (
+                <div key={bump.id} className={`speed-bump-warning ${isSameDirection ? 'same-direction' : 'opposite-direction'}`}>
+                  <div className="bump-distance">{Math.round(distance)}m ahead</div>
+                  <div className="bump-direction">
+                    {isSameDirection ? 
+                      `⚠️ Speed Bump in your direction (${bump.compassDirection})` :
+                      `ℹ️ Speed Bump in opposite direction (${bump.compassDirection})`
+                    }
+                  </div>
+                  <div className="bump-speed">Safe speed: {Math.round(bump.speed)} km/h</div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="no-speed-bumps">
+              {isTracking ? "🛣️ No speed bumps detected ahead" : "📡 Waiting for GPS..."}
+            </div>
+          )}
+        </div>
+      </div>
 
-        {/* Scanned Roads */}
-        <div className="scanned-roads-panel">
-          <h3>Scanned Road Segments ({scannedRoads.length})</h3>
-          <p>Roads that have been monitored for obstacles</p>
+      {/* Car Dashboard - Bottom */}
+      <div className="car-dashboard">
+        <div className="car-icon-section">
+          <DirectionsCarIcon className="car-icon" />
+          <div className={`gps-status ${isTracking ? 'active' : 'inactive'}`}>
+            {isTracking ? 'GPS' : 'NO GPS'}
+          </div>
+        </div>
+        
+        <div className="dashboard-info">
+          <div className="info-grid">
+            <div className="info-item">
+              <span className="info-label">LAT</span>
+              <span className="info-value">
+                {location.latitude ? location.latitude.toFixed(6) : 'Waiting...'}
+              </span>
+            </div>
+            <div className="info-item">
+              <span className="info-label">LON</span>
+              <span className="info-value">
+                {location.longitude ? location.longitude.toFixed(6) : 'Waiting...'}
+              </span>
+            </div>
+            <div className="info-item">
+              <span className="info-label">DIRECTION</span>
+              <span className="info-value">{getCompassDirection(direction)}</span>
+            </div>
+            <div className="info-item">
+              <span className="info-label">SPEED</span>
+              <span className="info-value">{Math.round(speed)} km/h</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>

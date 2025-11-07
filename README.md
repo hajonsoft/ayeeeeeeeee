@@ -51,7 +51,7 @@ For detailed mathematical explanations, see [GPS_FORMULAS_EXPLAINED.md](./GPS_FO
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/hajonsoft/ayeeeeeeeee
    cd obstacles
    ```
 

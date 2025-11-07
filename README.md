@@ -1,70 +1,179 @@
-# Getting Started with Create React App
+# GPS Obstacle Detection App
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A React-based mobile web application that tracks your location in real-time and detects potential speed bumps while driving. The app displays GPS coordinates, speed, direction, and provides a navigation interface similar to Google Maps.
 
-## Available Scripts
+## Features
 
-In the project directory, you can run:
+### 🗺️ Real-time GPS Tracking
+- Live latitude and longitude display (6 decimal precision)
+- Speed calculation in km/h
+- Direction tracking with compass bearing (0-360°)
+- GPS accuracy indicator
 
-### `npm start`
+### 🧭 Navigation Interface
+- Rotating directional arrow (like Google Maps)
+- Compass direction display (N, NE, E, SE, S, SW, W, NW)
+- Real-time direction updates based on movement
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+### 🚧 Speed Bump Detection
+- Automatic detection based on speed patterns
+- Records exact GPS coordinates of obstacles
+- Stores safe passing speed and direction
+- Directional awareness (speed bumps may exist in one direction only)
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+### 📊 Data Management
+- Historical speed bump records
+- Scanned road segments tracking
+- Persistent storage of obstacle locations
+- Timestamp tracking for all records
 
-### `npm test`
+## How It Works
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+### Mathematical Calculations
 
-### `npm run build`
+The app uses several mathematical formulas to calculate movement data:
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+1. **Distance Calculation**: Haversine formula for great-circle distance
+2. **Speed Calculation**: Distance over time, converted to km/h
+3. **Direction Calculation**: Forward azimuth bearing between GPS points
+4. **Speed Bump Detection**: Pattern recognition based on speed thresholds
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+For detailed mathematical explanations, see [GPS_FORMULAS_EXPLAINED.md](./GPS_FORMULAS_EXPLAINED.md)
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+### Speed Bump Detection Algorithm
 
-### `npm run eject`
+- Monitors rolling average of last 3 speed readings
+- Triggers when average speed < 20 km/h AND current speed < 15 km/h
+- Accounts for directional travel (obstacles may be one-way)
+- Records safe passing speed based on recent maximum speed
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+## Installation & Setup
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd obstacles
+   ```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+2. **Install dependencies**
+   ```bash
+   npm install
+   ```
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+3. **Start the development server**
+   ```bash
+   npm start
+   ```
 
-## Learn More
+4. **Access the app**
+   - Open `http://localhost:3000` in your browser
+   - **Important**: For GPS to work, you need HTTPS in production
+   - For testing, use Chrome with location permissions enabled
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+## Usage Instructions
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+### Getting Started
+1. Open the app on your mobile device or desktop
+2. Grant location permissions when prompted
+3. Wait for GPS lock (green indicator)
+4. Begin driving to see real-time data
 
-### Code Splitting
+### Recording Speed Bumps
+1. Drive normally - the app monitors your speed continuously
+2. When you slow down significantly (for a speed bump), an alert will appear
+3. Tap "Mark Speed Bump" to record the obstacle location
+4. The app saves GPS coordinates, direction, and safe speed
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+### Viewing Recorded Data
+- **Speed Bumps Panel**: Shows last 5 recorded obstacles
+- **Scanned Roads Panel**: Tracks road segments you've monitored
+- Each record includes precise coordinates, direction, and timestamp
 
-### Analyzing the Bundle Size
+## Technical Details
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+### GPS Requirements
+- High accuracy GPS enabled
+- HTTPS connection (required for geolocation API)
+- Location permissions granted
+- Stable GPS signal (accuracy < 10 meters recommended)
 
-### Making a Progressive Web App
+### Browser Compatibility
+- Chrome (recommended)
+- Safari (iOS/macOS)
+- Firefox
+- Edge
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+### Data Structure
 
-### Advanced Configuration
+**Speed Bump Record:**
+```javascript
+{
+  id: 1699372800000,
+  latitude: 40.748817,
+  longitude: -73.985428,
+  direction: 45.6,
+  safeSpeed: 18.5,
+  timestamp: "2023-11-07T15:20:00.000Z",
+  compassDirection: "NE"
+}
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+## Future Development Plans
 
-### Deployment
+### Phase 1: Database Integration
+- PostgreSQL/MongoDB backend
+- User authentication
+- Cloud storage for speed bump data
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+### Phase 2: Advanced Features
+- Predictive warnings for upcoming speed bumps
+- Route planning with obstacle avoidance
+- Community verification of speed bump reports
 
-### `npm run build` fails to minify
+### Phase 3: AI Enhancement
+- Machine learning for better detection accuracy
+- Pattern recognition for different obstacle types
+- False positive reduction algorithms
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+### Phase 4: Social Features
+- Crowdsourced obstacle reporting
+- User ratings and verification system
+- Real-time obstacle status updates
+
+## API Integration Plans
+
+Future versions will include:
+- **Google Maps Integration**: Visual map display
+- **OpenStreetMap**: Open-source mapping alternative
+- **Government Databases**: Official road hazard data
+- **Traffic APIs**: Real-time traffic integration
+
+## Privacy & Security
+
+- GPS data processed locally on device
+- No location tracking when app is closed
+- Optional data sharing for community features
+- User controls for data retention
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Implement your changes
+4. Add tests for new functionality
+5. Submit a pull request
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+## Support
+
+For questions, issues, or feature requests:
+- Create an issue on GitHub
+- Email: [your-email@example.com]
+- Documentation: See [GPS_FORMULAS_EXPLAINED.md](./GPS_FORMULAS_EXPLAINED.md)
+
+---
+
+**Note**: This app requires location permissions and works best with high-accuracy GPS. For production use, deploy over HTTPS to enable geolocation features.

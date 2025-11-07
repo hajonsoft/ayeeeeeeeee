@@ -1,38 +1,239 @@
 .App {
   text-align: center;
-}
-
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
-}
-
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
+  background-color: #1a1a1a;
   color: white;
+  min-height: 100vh;
+  padding: 20px;
+  font-family: 'Arial', sans-serif;
 }
 
-.App-link {
-  color: #61dafb;
+.gps-dashboard {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 20px;
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
+.gps-dashboard h1 {
+  color: #4CAF50;
+  margin-bottom: 30px;
+  font-size: 2.5em;
+  text-shadow: 0 0 10px rgba(76, 175, 80, 0.3);
+}
+
+.status-panel {
+  margin-bottom: 30px;
+}
+
+.status-indicator {
+  display: inline-block;
+  padding: 10px 20px;
+  border-radius: 25px;
+  font-weight: bold;
+  font-size: 1.1em;
+}
+
+.status-indicator.active {
+  background-color: #4CAF50;
+  color: white;
+  box-shadow: 0 0 15px rgba(76, 175, 80, 0.5);
+}
+
+.status-indicator.inactive {
+  background-color: #f44336;
+  color: white;
+  box-shadow: 0 0 15px rgba(244, 67, 54, 0.5);
+}
+
+.navigation-panel {
+  background: linear-gradient(135deg, #2196F3, #1976D2);
+  border-radius: 20px;
+  padding: 30px;
+  margin-bottom: 30px;
+  box-shadow: 0 8px 32px rgba(33, 150, 243, 0.3);
+}
+
+.direction-arrow {
+  font-size: 4em;
+  color: #fff;
+  transition: transform 0.3s ease;
+  margin-bottom: 10px;
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+}
+
+.compass-direction {
+  font-size: 1.5em;
+  font-weight: bold;
+  color: #fff;
+  letter-spacing: 2px;
+}
+
+.data-panel {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 15px;
+  padding: 25px;
+  margin-bottom: 30px;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.data-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 1.1em;
+}
+
+.data-row:last-child {
+  border-bottom: none;
+}
+
+.data-row label {
+  font-weight: bold;
+  color: #FFC107;
+}
+
+.data-row span {
+  color: #E0E0E0;
+  font-family: 'Courier New', monospace;
+}
+
+.speed-bump-alert {
+  background: linear-gradient(135deg, #FF9800, #FF5722);
+  border-radius: 15px;
+  padding: 20px;
+  margin-bottom: 30px;
+  box-shadow: 0 8px 32px rgba(255, 152, 0, 0.4);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+.speed-bump-alert p {
+  font-size: 1.2em;
+  margin-bottom: 15px;
+  font-weight: bold;
+}
+
+.record-button {
+  background: #4CAF50;
+  color: white;
+  border: none;
+  padding: 12px 25px;
+  margin: 0 10px;
+  border-radius: 25px;
+  font-size: 1em;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+}
+
+.record-button:hover {
+  background: #45a049;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+}
+
+.dismiss-button {
+  background: #757575;
+  color: white;
+  border: none;
+  padding: 12px 25px;
+  margin: 0 10px;
+  border-radius: 25px;
+  font-size: 1em;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.dismiss-button:hover {
+  background: #616161;
+  transform: translateY(-2px);
+}
+
+.speed-bumps-panel,
+.scanned-roads-panel {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 15px;
+  padding: 20px;
+  margin-bottom: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.speed-bumps-panel h3,
+.scanned-roads-panel h3 {
+  color: #FFC107;
+  margin-bottom: 15px;
+  font-size: 1.3em;
+}
+
+.speed-bumps-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.speed-bump-item {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 15px;
+  margin-bottom: 10px;
+  border-left: 4px solid #FF9800;
+}
+
+.bump-location {
+  font-family: 'Courier New', monospace;
+  color: #E0E0E0;
+  margin-bottom: 5px;
+}
+
+.bump-details {
+  color: #FFC107;
+  font-size: 0.9em;
+  margin-bottom: 5px;
+}
+
+.bump-time {
+  color: #9E9E9E;
+  font-size: 0.8em;
+}
+
+.scanned-roads-panel p {
+  color: #B0BEC5;
+  font-style: italic;
+  margin: 0;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .App {
+    padding: 10px;
   }
-  to {
-    transform: rotate(360deg);
+  
+  .gps-dashboard {
+    padding: 10px;
+  }
+  
+  .gps-dashboard h1 {
+    font-size: 2em;
+  }
+  
+  .direction-arrow {
+    font-size: 3em;
+  }
+  
+  .data-row {
+    flex-direction: column;
+    text-align: left;
+  }
+  
+  .data-row span {
+    margin-top: 5px;
   }
 }

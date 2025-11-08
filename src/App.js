@@ -29,6 +29,7 @@ function App() {
   const [username, setUsername] = useState('');
   const [isUserInfoVisible, setIsUserInfoVisible] = useState(false);
   const [isRecordingSpeedBump, setIsRecordingSpeedBump] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const NEARBY_DISTANCE = 500; // meters - for display
   const QUERY_RADIUS = 100; // kilometers - for database query
@@ -415,6 +416,33 @@ function App() {
     }
   }, [user, location.latitude, location.longitude, loadNearbySpeedBumps]);
 
+  // Fullscreen functionality
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+        setIsFullscreen(true);
+      } else {
+        await document.exitFullscreen();
+        setIsFullscreen(false);
+      }
+    } catch (error) {
+      console.error('Error toggling fullscreen:', error);
+    }
+  }, []);
+
+  // Listen for fullscreen changes
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
   // Check if we need to update the query based on location change and cooldown
   const shouldUpdateQuery = useCallback((currentLat, currentLng, lastLat, lastLng) => {
     if (!lastLat || !lastLng) return true;
@@ -602,6 +630,13 @@ function App() {
             </div>
           </div>
           <div className="header-buttons">
+            <button 
+              onClick={toggleFullscreen}
+              className="fullscreen-btn"
+              title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+            >
+              {isFullscreen ? '🔳 Exit' : '⛶ Full'}
+            </button>
             <button 
               onClick={() => setAutoRefresh(!autoRefresh)} 
               className={`auto-refresh-btn ${autoRefresh ? 'active' : 'inactive'}`}

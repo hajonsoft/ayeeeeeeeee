@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { collection, addDoc, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, addDoc, query, where, onSnapshot, getDocs } from 'firebase/firestore';
+import { deleteDoc, doc } from 'firebase/firestore';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from 'firebase/auth';
 import { db, auth } from './firebase';
 import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
@@ -30,7 +31,7 @@ function App() {
   const [isRecordingSpeedBump, setIsRecordingSpeedBump] = useState(false);
 
   const NEARBY_DISTANCE = 500; // meters - for display
-  const QUERY_RADIUS = 50; // kilometers - for database query
+  const QUERY_RADIUS = 100; // kilometers - for database query
   const QUERY_UPDATE_THRESHOLD = 10; // kilometers - when to refresh query
   const QUERY_COOLDOWN = 30000; // 30 seconds minimum between queries
   const LOCATION_DEBOUNCE = 5000; // 5 seconds debounce for location updates
@@ -241,42 +242,71 @@ function App() {
       // Calculate bounding box
       const bounds = getGeographicBounds(lat, lng, radius);
       
-      console.log(`Querying speed bumps within ${radius}km of ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+      console.log(`🔍 Querying speed bumps within ${radius}km of ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+      console.log('📦 Calculated bounds:', bounds);
       
-      // Create Firestore query with geographic bounds
+      // Use a simpler query to avoid Firestore compound query limitations
+      // Query only by latitude range, then filter longitude and distance on client
       const q = query(
         collection(db, 'speedBumps'),
         where('latitude', '>=', bounds.south),
-        where('latitude', '<=', bounds.north),
-        where('longitude', '>=', bounds.west),
-        where('longitude', '<=', bounds.east)
+        where('latitude', '<=', bounds.north)
       );
+
+      console.log('🔍 Firestore query created for latitude range:', bounds.south, 'to', bounds.north);
 
       // Listen for real-time updates
       const unsubscribe = onSnapshot(q, (snapshot) => {
+        console.log(`📄 Firestore returned ${snapshot.size} documents within latitude bounds`);
         const bumps = [];
+        
         snapshot.forEach((doc) => {
           const data = doc.data();
-          // Additional distance filtering to ensure circular radius
-          const distance = calculateDistance(lat, lng, data.latitude, data.longitude);
-          if (distance <= radius * 1000) { // Convert km to meters
-            bumps.push({
-              id: doc.id,
-              ...data
+          console.log(`📍 Processing document ${doc.id}:`, {
+            id: doc.id,
+            lat: data.latitude, 
+            lng: data.longitude,
+            inLatBounds: data.latitude >= bounds.south && data.latitude <= bounds.north,
+            inLngBounds: data.longitude >= bounds.west && data.longitude <= bounds.east
+          });
+          
+          // Filter by longitude range and circular distance
+          if (data.longitude >= bounds.west && 
+              data.longitude <= bounds.east) {
+            const distance = calculateDistance(lat, lng, data.latitude, data.longitude);
+            console.log(`📏 Distance to ${doc.id}: ${distance}m (${(distance/1000).toFixed(1)}km)`);
+            
+            if (distance <= radius * 1000) { // Convert km to meters
+              bumps.push({
+                id: doc.id,
+                distance: distance,
+                ...data
+              });
+              console.log(`✅ Added speed bump ${doc.id} at ${(distance/1000).toFixed(1)}km`);
+            } else {
+              console.log(`❌ Excluded speed bump ${doc.id} - too far: ${(distance/1000).toFixed(1)}km`);
+            }
+          } else {
+            console.log(`❌ Excluded speed bump ${doc.id} - outside longitude bounds:`, {
+              longitude: data.longitude,
+              west: bounds.west,
+              east: bounds.east,
+              withinBounds: data.longitude >= bounds.west && data.longitude <= bounds.east
             });
           }
         });
         
         // Sort by distance
-        bumps.sort((a, b) => {
-          const distanceA = calculateDistance(lat, lng, a.latitude, a.longitude);
-          const distanceB = calculateDistance(lat, lng, b.latitude, b.longitude);
-          return distanceA - distanceB;
+        bumps.sort((a, b) => a.distance - b.distance);
+        
+        console.log(`Final result: ${bumps.length} speed bumps within ${radius}km radius:`);
+        bumps.forEach((bump, i) => {
+          console.log(`  ${i+1}. ${bump.id} - ${(bump.distance/1000).toFixed(1)}km`);
         });
         
-        console.log(`Loaded ${bumps.length} speed bumps from database`);
         setSpeedBumps(bumps);
         setIsLoadingSpeedBumps(false);
+        setLastQueryLocation({ latitude: lat, longitude: lng });
       }, (error) => {
         console.error('Error in speed bumps subscription:', error);
         setIsLoadingSpeedBumps(false);
@@ -356,6 +386,35 @@ function App() {
     }
   }, [location, direction, speed, getCompassDirection, user, username, autoRefresh, loadNearbySpeedBumps, isRecordingSpeedBump]);
 
+  // Delete speed bump function
+  const deleteSpeedBump = useCallback(async (speedBumpId) => {
+    if (!user) {
+      console.log('User not authenticated, cannot delete speed bump');
+      return;
+    }
+
+    try {
+      console.log('Deleting speed bump:', speedBumpId);
+      
+      // Delete from Firestore
+      await deleteDoc(doc(db, 'speedBumps', speedBumpId));
+      
+      console.log('Speed bump deleted successfully:', speedBumpId);
+      
+      // Remove from local state immediately for instant UI feedback
+      setSpeedBumps(prevBumps => prevBumps.filter(bump => bump.id !== speedBumpId));
+      setNearbySpeedBumps(prevNearby => prevNearby.filter(bump => bump.id !== speedBumpId));
+      
+    } catch (error) {
+      console.error('Error deleting speed bump:', error);
+      
+      // Reload speed bumps on error to ensure UI consistency
+      if (location.latitude && location.longitude) {
+        loadNearbySpeedBumps(location.latitude, location.longitude);
+      }
+    }
+  }, [user, location.latitude, location.longitude, loadNearbySpeedBumps]);
+
   // Check if we need to update the query based on location change and cooldown
   const shouldUpdateQuery = useCallback((currentLat, currentLng, lastLat, lastLng) => {
     if (!lastLat || !lastLng) return true;
@@ -369,6 +428,40 @@ function App() {
     const distance = calculateDistance(currentLat, currentLng, lastLat, lastLng);
     return distance > (QUERY_UPDATE_THRESHOLD * 1000); // Convert km to meters
   }, [calculateDistance, QUERY_UPDATE_THRESHOLD, lastQueryTime, QUERY_COOLDOWN]);
+
+  // Test query to debug database contents (temporary)
+  const debugDatabaseContents = useCallback(async () => {
+    console.log('🔬 DEBUG: Checking all documents in speedBumps collection...');
+    try {
+      const allDocsQuery = query(collection(db, 'speedBumps'));
+      const snapshot = await getDocs(allDocsQuery);
+      console.log(`🔬 DEBUG: Found ${snapshot.size} total documents in database`);
+      
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        console.log(`🔬 Document ${doc.id}:`, {
+          id: doc.id,
+          latitude: data.latitude,
+          longitude: data.longitude,
+          hasLatitude: data.latitude !== undefined,
+          hasLongitude: data.longitude !== undefined,
+          latitudeType: typeof data.latitude,
+          longitudeType: typeof data.longitude
+        });
+      });
+    } catch (error) {
+      console.error('🔬 DEBUG: Error fetching all documents:', error);
+    }
+  }, []);
+
+  // Auto-load speed bumps when user is authenticated and GPS is available
+  useEffect(() => {
+    if (user && location.latitude && location.longitude && speedBumps.length === 0) {
+      console.log('Initial load: Loading speed bumps for authenticated user...');
+      debugDatabaseContents(); // Debug database contents
+      loadNearbySpeedBumps(location.latitude, location.longitude);
+    }
+  }, [user, location.latitude, location.longitude, speedBumps.length, loadNearbySpeedBumps, debugDatabaseContents]);
 
   // Debounced location effect to prevent excessive queries
   useEffect(() => {
@@ -503,7 +596,11 @@ function App() {
       {/* Speed Bumps Area - Top */}
       <div className="speed-bumps-area">
         <div className="speed-bumps-header">
-          <h3>Upcoming Speed Bumps</h3>
+          <div className="header-stats">
+            <div className="stats-line">
+              📊 {speedBumps.length} bumps • 📍 {location.latitude?.toFixed(4)}, {location.longitude?.toFixed(4)} • 🕐 {Math.floor((Date.now() - lastUpdateTime) / 1000)}s ago
+            </div>
+          </div>
           <div className="header-buttons">
             <button 
               onClick={() => setAutoRefresh(!autoRefresh)} 
@@ -555,24 +652,7 @@ function App() {
           </div>
         )}
         
-        <div className="query-info">
-          <div className="query-stats">
-            📊 Loaded: {speedBumps.length} speed bumps within {QUERY_RADIUS}km
-            {lastQueryLocation && (
-              <span className="query-location">
-                📍 Query center: {lastQueryLocation.latitude.toFixed(4)}, {lastQueryLocation.longitude.toFixed(4)}
-              </span>
-            )}
-            {lastQueryTime > 0 && (
-              <span className="query-time">
-                🕐 Last update: {Math.floor((Date.now() - lastQueryTime) / 1000)}s ago
-                {Date.now() - lastQueryTime < QUERY_COOLDOWN && (
-                  <span className="cooldown"> (Cooldown: {Math.ceil((QUERY_COOLDOWN - (Date.now() - lastQueryTime)) / 1000)}s)</span>
-                )}
-              </span>
-            )}
-          </div>
-        </div>        <div className="nearby-speed-bumps">
+        <div className="nearby-speed-bumps">
           {isLoadingSpeedBumps ? (
             <div className="loading-speed-bumps">
               <div className="loading-spinner">🔄</div>
@@ -589,7 +669,13 @@ function App() {
               const isSameDirection = isDirectionSimilar(direction, bump.direction);
               
               return (
-                <div key={bump.id} className={`speed-bump-warning ${isSameDirection ? 'same-direction' : 'opposite-direction'}`}>
+                <div 
+                  key={bump.id} 
+                  className={`speed-bump-warning ${isSameDirection ? 'same-direction' : 'opposite-direction'}`}
+                  onClick={() => deleteSpeedBump(bump.id)}
+                  style={{ cursor: user ? 'pointer' : 'default' }}
+                  title={user ? "Click to delete this speed bump" : "Sign in to delete speed bumps"}
+                >
                   <div className="bump-distance">{Math.round(distance)}m ahead</div>
                   <div className="bump-direction">
                     {isSameDirection ? 
@@ -601,6 +687,11 @@ function App() {
                   <div className="bump-reporter">
                     👤 Reported by: {bump.username || `User_${bump.userId?.slice(-8)}` || 'Unknown'}
                   </div>
+                  {user && (
+                    <div className="delete-hint">
+                      🗑️ Click to delete
+                    </div>
+                  )}
                 </div>
               );
             })

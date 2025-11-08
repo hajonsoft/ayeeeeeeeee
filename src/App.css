@@ -186,10 +186,19 @@
   gap: 10px;
 }
 
-.speed-bumps-header h3 {
-  color: #FF6B6B;
-  font-size: 1.5em;
-  margin: 0;
+.header-stats {
+  flex: 1;
+  min-width: 200px;
+}
+
+.stats-line {
+  color: #4ECDC4;
+  font-size: 0.9em;
+  font-weight: bold;
+  font-family: 'Courier New', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .header-buttons {
@@ -393,6 +402,22 @@
   padding: 15px;
   border-left: 5px solid #FF6B6B;
   backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.speed-bump-warning:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.speed-bump-warning[style*="pointer"]:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.speed-bump-warning[style*="pointer"]:active {
+  transform: translateY(0);
+  background: rgba(255, 107, 107, 0.2);
 }
 
 .speed-bump-warning.same-direction {
@@ -400,9 +425,32 @@
   background: rgba(255, 107, 107, 0.1);
 }
 
+.speed-bump-warning.same-direction[style*="pointer"]:hover {
+  background: rgba(255, 107, 107, 0.15);
+}
+
 .speed-bump-warning.opposite-direction {
   border-left-color: #4ECDC4;
   background: rgba(78, 205, 196, 0.1);
+}
+
+.speed-bump-warning.opposite-direction[style*="pointer"]:hover {
+  background: rgba(78, 205, 196, 0.15);
+}
+
+.delete-hint {
+  position: absolute;
+  top: 10px;
+  right: 15px;
+  font-size: 0.8em;
+  color: #ff6b6b;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.speed-bump-warning:hover .delete-hint {
+  opacity: 0.8;
 }
 
 .bump-distance {
@@ -628,15 +676,22 @@
   
   .speed-bumps-header {
     flex-direction: column;
-    gap: 15px;
+    gap: 10px;
     text-align: center;
   }
   
-  .speed-bumps-header h3 {
-    font-size: 1.3em;
+  .header-stats {
+    order: 2;
+    min-width: auto;
+  }
+  
+  .stats-line {
+    font-size: 0.8em;
+    text-align: center;
   }
   
   .header-buttons {
+    order: 1;
     justify-content: center;
     gap: 8px;
   }
@@ -722,25 +777,39 @@
 
 /* Landscape Mode - Optimized for iPhone landscape */
 @media (orientation: landscape) {
+  /* Fullscreen for mobile landscape */
+  .App {
+    height: 100vh;
+    height: 100dvh; /* Dynamic viewport height for mobile browsers */
+  }
+  
+  body {
+    overflow: hidden;
+  }
+  
   .App {
     flex-direction: column;
   }
   
   .speed-bumps-area {
     flex: 1;
-    padding: 15px 20px;
+    padding: 10px 15px;
   }
   
   .speed-bumps-header {
-    margin-bottom: 15px;
+    margin-bottom: 10px;
   }
   
-  .speed-bumps-header h3 {
-    font-size: 1.4em;
+  .header-stats {
+    min-width: 150px;
+  }
+  
+  .stats-line {
+    font-size: 0.75em;
   }
   
   .header-buttons {
-    gap: 8px;
+    gap: 6px;
   }
   
   .auto-refresh-btn,
@@ -770,13 +839,10 @@
     font-size: 0.8em;
   }
   
-  .query-info {
-    padding: 10px;
-    margin-bottom: 15px;
-  }
-  
-  .query-stats {
-    font-size: 0.8em;
+  .nearby-speed-bumps {
+    max-height: calc(100vh - 200px);
+    max-height: calc(100dvh - 200px);
+    overflow-y: auto;
   }
   
   .car-dashboard {
@@ -809,11 +875,6 @@
   .info-grid {
     grid-template-columns: repeat(4, 1fr);
     gap: 20px;
-  }
-  
-  .nearby-speed-bumps {
-    max-height: calc(100vh - 250px);
-    overflow-y: auto;
   }
 }
 
@@ -860,8 +921,12 @@
     font-size: 1.4em;
   }
   
-  .speed-bumps-header h3 {
-    font-size: 1.8em;
+  .stats-line {
+    font-size: 1em;
+  }
+  
+  .speed-bumps-header {
+    margin-bottom: 25px;
   }
   
   .large-record-speed-bump-btn {

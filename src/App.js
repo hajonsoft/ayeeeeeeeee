@@ -30,6 +30,8 @@ function App() {
   const [isUserInfoVisible, setIsUserInfoVisible] = useState(false);
   const [isRecordingSpeedBump, setIsRecordingSpeedBump] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isDangerMode, setIsDangerMode] = useState(false);
+  const [speedBumpsAhead, setSpeedBumpsAhead] = useState([]);
 
   const NEARBY_DISTANCE = 500; // meters - for display
   const QUERY_RADIUS = 100; // kilometers - for database query
@@ -64,6 +66,24 @@ function App() {
     return (bearing + 360) % 360; // Normalize to 0-360 degrees
   }, []);
 
+  // Enhanced direction calculation - determines if speed bump is ahead or behind based on movement
+  const isSpeedBumpAhead = useCallback((currentLat, currentLng, bumpLat, bumpLng, movementDirection) => {
+    if (!movementDirection && movementDirection !== 0) return true; // Default to ahead if no direction
+    
+    // Calculate bearing from current position to speed bump
+    const bearingToBump = calculateBearing(currentLat, currentLng, bumpLat, bumpLng);
+    
+    // Calculate the difference between movement direction and bearing to bump
+    let angleDiff = Math.abs(bearingToBump - movementDirection);
+    if (angleDiff > 180) {
+      angleDiff = 360 - angleDiff;
+    }
+    
+    // If angle difference is less than 90 degrees, speed bump is ahead
+    // If more than 90 degrees, it's behind
+    return angleDiff < 90;
+  }, [calculateBearing]);
+
   // Get compass direction from bearing
   const getCompassDirection = useCallback((bearing) => {
     const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
@@ -93,6 +113,44 @@ function App() {
     });
 
     return unsubscribe;
+  }, []);
+
+  // Initialize audio and notification permissions
+  useEffect(() => {
+    const initializePermissions = async () => {
+      // Request notification permission for audio fallback
+      if ('Notification' in window && Notification.permission === 'default') {
+        try {
+          await Notification.requestPermission();
+          console.log('📣 Notification permission requested');
+        } catch (error) {
+          console.log('Notification permission not available:', error);
+        }
+      }
+
+      // Initialize audio context on first user interaction
+      const initAudio = () => {
+        try {
+          if (window.AudioContext || window.webkitAudioContext) {
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioContext.state === 'suspended') {
+              audioContext.resume();
+            }
+            console.log('🔊 Audio context initialized');
+            document.removeEventListener('click', initAudio);
+            document.removeEventListener('touchstart', initAudio);
+          }
+        } catch (error) {
+          console.log('Audio context initialization failed:', error);
+        }
+      };
+
+      // Listen for first user interaction to initialize audio
+      document.addEventListener('click', initAudio);
+      document.addEventListener('touchstart', initAudio);
+    };
+
+    initializePermissions();
   }, []);
 
   // Google Sign In
@@ -416,6 +474,15 @@ function App() {
     }
   }, [user, location.latitude, location.longitude, loadNearbySpeedBumps]);
 
+  // Vibration alert (for mobile devices)
+  const triggerVibration = useCallback(() => {
+    if ('vibrate' in navigator) {
+      // Strong vibration pattern: long buzz, pause, 3 short buzzes
+      navigator.vibrate([500, 200, 100, 100, 100, 100, 100]);
+      console.log('📳 VIBRATION TRIGGERED');
+    }
+  }, []);
+
   // Fullscreen functionality
   const toggleFullscreen = useCallback(async () => {
     try {
@@ -441,6 +508,71 @@ function App() {
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
+  }, []);
+
+  // Enhanced urgent audio alert system
+  const playWarningSound = useCallback(() => {
+    try {
+      console.log('🔊 PLAYING URGENT WARNING SOUND');
+      
+      // Create multiple audio alerts with better browser support
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      
+      // Resume audio context if suspended (required on many browsers after user interaction)
+      if (audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
+      
+      // Play a sequence of urgent beeps
+      const playBeep = (frequency, duration, delay = 0) => {
+        setTimeout(() => {
+          const oscillator = audioContext.createOscillator();
+          const gainNode = audioContext.createGain();
+          
+          oscillator.connect(gainNode);
+          gainNode.connect(audioContext.destination);
+          
+          oscillator.frequency.value = frequency;
+          oscillator.type = 'sawtooth'; // More harsh/urgent sound than sine
+          
+          gainNode.gain.setValueAtTime(0.8, audioContext.currentTime); // Much louder volume
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+          
+          oscillator.start(audioContext.currentTime);
+          oscillator.stop(audioContext.currentTime + duration);
+        }, delay);
+      };
+      
+      // Play urgent sequence: 3 quick high-pitched beeps
+      playBeep(1200, 0.15, 0);    // Very high beep
+      playBeep(900, 0.15, 200);   // High beep  
+      playBeep(1400, 0.2, 400);   // Extremely high beep
+      
+    } catch (error) {
+      console.error('Primary audio failed:', error);
+      
+      // Fallback 1: Try HTML5 audio with beep sound
+      try {
+        const audio = new Audio();
+        audio.src = 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmMcBSKB0fTWfCsEKHfM8N6QQgsMW7Pp4qNTFApsqebUhz0KOovN8uF9KQQvgdPz1oAqBSuBzfDcaR0INYvU9OV/KgUqaLjl4pNQEg8xotf04YAqBSdcpt7vo2EQD2Sc1/HdaR0IMYLt89qBKQVTe9H04ehuFghUe6Hv3mEQDWuBz/LfaiALJITT9OJ9KQUpaOTe5oFDBDVQebHv3W4qBiOI2vDdaxwJM3e89N5QEQ8ybOfk5ZdOFAl/ntLz2IAqBCCB0fPaeCwGI3bM8N6QQgkTXLPp4qNTFAlIoutSEQ4ngNPz1oAqBSuBzfDcaR0INYvU9OV/KgUqaLjl4pNQEg8xotf04YAqBSdcpt7vo2EQD2Sc1/HdaR0IMYLt89qBKQVTe9H04ehuFghUe6Hv3mEQDWuBz/LfaiALJITT9OJ9KQUpaOTe5oFDBDVQebHv3W4qBiOI2vDdaxwJM3e89N5QEQ8ybOfk5ZdOFAl/ntLz2IAqBCCB0fPaeCwGI3bM8N6QQgkTXLPp4qNTFA==';
+        audio.volume = 0.7;
+        audio.play();
+        console.log('🔊 Fallback HTML5 audio played');
+      } catch (fallbackError) {
+        console.error('HTML5 audio fallback failed:', fallbackError);
+        
+        // Fallback 2: System notification sound
+        try {
+          new Notification('⚠️ SPEED BUMP AHEAD!', {
+            icon: '⚠️',
+            tag: 'speedbump-warning'
+          });
+          console.log('🔔 Notification fallback used');
+        } catch (notifError) {
+          console.error('All audio methods failed:', notifError);
+        }
+      }
+    }
   }, []);
 
   // Check if we need to update the query based on location change and cooldown
@@ -574,16 +706,82 @@ function App() {
           bump.latitude,
           bump.longitude
         );
-        return distance <= NEARBY_DISTANCE;
+        
+        // Check if speed bump is ahead or behind
+        const isAhead = isSpeedBumpAhead(
+          location.latitude, 
+          location.longitude, 
+          bump.latitude, 
+          bump.longitude, 
+          direction
+        );
+        
+        // Include if:
+        // 1. Speed bump is ahead and within NEARBY_DISTANCE
+        // 2. Speed bump is behind but within 200 meters (for short display after passing)
+        if (isAhead) {
+          return distance <= NEARBY_DISTANCE;
+        } else {
+          return distance <= 200; // Show behind speed bumps only for 200m
+        }
+      }).map(bump => {
+        const distance = calculateDistance(
+          location.latitude, 
+          location.longitude, 
+          bump.latitude, 
+          bump.longitude
+        );
+        const isAhead = isSpeedBumpAhead(
+          location.latitude, 
+          location.longitude, 
+          bump.latitude, 
+          bump.longitude, 
+          direction
+        );
+        
+        return {
+          ...bump,
+          distance: distance,
+          isAhead: isAhead
+        };
       }).sort((a, b) => {
-        const distanceA = calculateDistance(location.latitude, location.longitude, a.latitude, a.longitude);
-        const distanceB = calculateDistance(location.latitude, location.longitude, b.latitude, b.longitude);
-        return distanceA - distanceB;
+        // Sort by: ahead first, then by distance
+        if (a.isAhead !== b.isAhead) {
+          return a.isAhead ? -1 : 1; // Ahead bumps first
+        }
+        return a.distance - b.distance;
       });
       
       setNearbySpeedBumps(nearby);
+      
+      // Update danger mode and speed bumps ahead
+      const bumpsAhead = nearby.filter(bump => bump.isAhead && bump.distance <= 300); // 300m warning distance
+      setSpeedBumpsAhead(bumpsAhead);
+      setIsDangerMode(bumpsAhead.length > 0);
+      
+      // Trigger EXTREME alerts for very close speed bumps (within 150m)
+      const veryCloseBumps = bumpsAhead.filter(bump => bump.distance <= 150);
+      if (veryCloseBumps.length > 0 && speedBumpsAhead.length === 0) {
+        // Only trigger alerts when new speed bumps come into close range
+        console.log('🚨 EXTREME ALERT TRIGGERED - SPEED BUMP VERY CLOSE!');
+        
+        // Audio alert
+        playWarningSound();
+        
+        // Vibration alert
+        triggerVibration();
+        
+        // Set extreme danger mode for ultra-dramatic visuals
+        setIsDangerMode(true);
+        
+        // Flash screen multiple times
+        setTimeout(() => setIsDangerMode(false), 200);
+        setTimeout(() => setIsDangerMode(true), 400);
+        setTimeout(() => setIsDangerMode(false), 600);
+        setTimeout(() => setIsDangerMode(true), 800);
+      }
     }
-  }, [location, speedBumps, calculateDistance]);
+  }, [location, speedBumps, calculateDistance, direction, isSpeedBumpAhead, speedBumpsAhead.length, playWarningSound, triggerVibration]);
 
   // Check direction similarity
   const isDirectionSimilar = useCallback((dir1, dir2, tolerance = 45) => {
@@ -598,7 +796,7 @@ function App() {
   }, [startTracking]);
 
     return (
-    <div className="App">
+    <div className={`App ${isDangerMode ? 'danger-mode' : ''}`}>
       {isAuthenticating && (
         <div className="auth-overlay">
           <div className="auth-message">
@@ -694,29 +892,36 @@ function App() {
               <p>Loading nearby speed bumps...</p>
             </div>
           ) : nearbySpeedBumps.length > 0 ? (
-            nearbySpeedBumps.slice(0, 3).map(bump => {
-              const distance = calculateDistance(
-                location.latitude || 0,
-                location.longitude || 0,
+            nearbySpeedBumps.map((bump) => {
+              const distance = bump.distance || calculateDistance(
+                location.latitude,
+                location.longitude,
                 bump.latitude,
                 bump.longitude
               );
+              
+              const isAhead = bump.isAhead !== undefined ? bump.isAhead : true;
               const isSameDirection = isDirectionSimilar(direction, bump.direction);
               
               return (
                 <div 
                   key={bump.id} 
-                  className={`speed-bump-warning ${isSameDirection ? 'same-direction' : 'opposite-direction'}`}
+                  className={`speed-bump-warning ${isSameDirection ? 'same-direction' : 'opposite-direction'} ${isAhead ? 'ahead' : 'behind'}`}
                   onClick={() => deleteSpeedBump(bump.id)}
                   style={{ cursor: user ? 'pointer' : 'default' }}
                   title={user ? "Click to delete this speed bump" : "Sign in to delete speed bumps"}
                 >
-                  <div className="bump-distance">{Math.round(distance)}m ahead</div>
+                  <div className="bump-distance">
+                    {Math.round(distance)}m {isAhead ? 'ahead' : 'behind'}
+                  </div>
                   <div className="bump-direction">
-                    {isSameDirection ? 
-                      `⚠️ Speed Bump in your direction (${bump.compassDirection})` :
-                      `ℹ️ Speed Bump in opposite direction (${bump.compassDirection})`
-                    }
+                    {isAhead ? (
+                      isSameDirection ? 
+                        `⚠️ Speed Bump AHEAD in your direction (${bump.compassDirection})` :
+                        `ℹ️ Speed Bump ahead in opposite direction (${bump.compassDirection})`
+                    ) : (
+                      `✓ Speed Bump behind (${bump.compassDirection})`
+                    )}
                   </div>
                   <div className="bump-speed">Safe speed: {Math.round(bump.speed)} km/h</div>
                   <div className="bump-reporter">

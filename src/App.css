@@ -12,6 +12,64 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  transition: all 0.5s ease;
+}
+
+.App.danger-mode {
+  background: #ff0000 !important; /* Bright red background */
+  animation: extremeDangerPulse 0.3s infinite alternate, dangerShake 0.1s infinite !important;
+  box-shadow: 0 0 50px #ff0000, inset 0 0 50px rgba(255, 0, 0, 0.5) !important;
+  border: 5px solid #ffff00 !important; /* Yellow warning border */
+}
+
+/* Extreme pulsing animation */
+@keyframes extremeDangerPulse {
+  0% {
+    background-color: #ff0000 !important;
+    box-shadow: 0 0 20px #ff0000;
+  }
+  50% {
+    background-color: #ff6600 !important;
+    box-shadow: 0 0 60px #ff6600;
+  }
+  100% {
+    background-color: #ffff00 !important;
+    box-shadow: 0 0 100px #ffff00;
+  }
+}
+
+/* Screen shake effect */
+@keyframes dangerShake {
+  0% { transform: translate(0); }
+  10% { transform: translate(-2px, -2px); }
+  20% { transform: translate(2px, -2px); }
+  30% { transform: translate(-2px, 2px); }
+  40% { transform: translate(2px, 2px); }
+  50% { transform: translate(-2px, -2px); }
+  60% { transform: translate(2px, -2px); }
+  70% { transform: translate(-2px, 2px); }
+  80% { transform: translate(2px, 2px); }
+  90% { transform: translate(-2px, -2px); }
+  100% { transform: translate(2px, -2px); }
+}
+
+/* Original subtle danger pulse (kept as backup) */
+@keyframes dangerPulse {
+  0% {
+    background-color: #0a0a0a;
+  }
+  25% {
+    background-color: #2d1414;
+  }
+  50% {
+    background-color: #4a1a1a;
+  }
+  75% {
+    background-color: #661a1a;
+  }
+  100% {
+    background-color: #0a0a0a;
+  }
 }
 
 /* Authentication overlay */
@@ -439,13 +497,67 @@
   background: rgba(255, 107, 107, 0.2);
 }
 
-.speed-bump-warning.same-direction {
-  border-left-color: #FF6B6B;
-  background: rgba(255, 107, 107, 0.1);
+.speed-bump-warning.ahead {
+  border-left-color: #FF0000 !important;
+  border-width: 8px !important;
+  background: linear-gradient(45deg, #ff0000, #ff6600, #ffff00) !important;
+  box-shadow: 0 0 50px rgba(255, 0, 0, 0.8), 0 0 20px #ffff00 !important;
+  animation: extremeUrgentWarning 0.2s infinite alternate !important;
+  transform: scale(1.05) !important;
+  font-weight: bold !important;
+  color: #ffffff !important;
+  text-shadow: 2px 2px 4px #000000 !important;
 }
 
-.speed-bump-warning.same-direction[style*="pointer"]:hover {
-  background: rgba(255, 107, 107, 0.15);
+.speed-bump-warning.behind {
+  border-left-color: #95A5A6;
+  background: rgba(149, 165, 166, 0.1);
+  opacity: 0.7;
+}
+
+.speed-bump-warning.ahead.same-direction {
+  background: linear-gradient(45deg, #ff0000, #ff3300, #ff6600, #ffff00) !important;
+  animation: extremeUrgentWarning 0.15s infinite alternate, warningGlow 0.3s infinite !important;
+  border: 3px solid #ffff00 !important;
+  font-size: 1.1em !important;
+}
+
+/* Extreme urgent warning animation */
+@keyframes extremeUrgentWarning {
+  0% {
+    background: linear-gradient(45deg, #ff0000, #ff3300) !important;
+    transform: scale(1.0);
+    box-shadow: 0 0 30px rgba(255, 0, 0, 0.9);
+  }
+  100% {
+    background: linear-gradient(45deg, #ffff00, #ff6600) !important;
+    transform: scale(1.1);
+    box-shadow: 0 0 50px rgba(255, 255, 0, 0.9);
+  }
+}
+
+/* Warning glow effect */
+@keyframes warningGlow {
+  0% {
+    box-shadow: 0 0 20px #ff0000, 0 0 40px #ff0000, 0 0 60px #ff0000;
+  }
+  50% {
+    box-shadow: 0 0 30px #ff6600, 0 0 50px #ff6600, 0 0 80px #ff6600;
+  }
+  100% {
+    box-shadow: 0 0 40px #ffff00, 0 0 60px #ffff00, 0 0 100px #ffff00;
+  }
+}
+
+@keyframes urgentWarning {
+  0%, 100% {
+    background: rgba(255, 51, 51, 0.15);
+    transform: scale(1);
+  }
+  50% {
+    background: rgba(255, 51, 51, 0.25);
+    transform: scale(1.02);
+  }
 }
 
 .speed-bump-warning.opposite-direction {

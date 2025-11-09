@@ -33,6 +33,8 @@ function App() {
   const [isDangerMode, setIsDangerMode] = useState(false);
   const [speedBumpsAhead, setSpeedBumpsAhead] = useState([]);
   const [testMode, setTestMode] = useState('setup'); // 'setup', 'ready', 'running'
+  const [speedBumpMinDistances, setSpeedBumpMinDistances] = useState({}); // Track closest we've been to each bump
+  const [speedBumpPrevDistances, setSpeedBumpPrevDistances] = useState({}); // Track previous distance to each bump
 
   const NEARBY_DISTANCE = 500; // meters - for display
   const QUERY_RADIUS = 100; // kilometers - for database query
@@ -67,66 +69,57 @@ function App() {
     return (bearing + 360) % 360; // Normalize to 0-360 degrees
   }, []);
 
-  // Enhanced direction calculation - determines if speed bump is ahead or behind based on movement
-  const isSpeedBumpAhead = useCallback((currentLat, currentLng, bumpLat, bumpLng, movementDirection, previousLat = null, previousLng = null) => {
-    if (!movementDirection && movementDirection !== 0) return true; // Default to ahead if no direction
-    
+  // Simple speed bump tracking - tracks closest distance and current trend
+  const isSpeedBumpAhead = useCallback((currentLat, currentLng, bumpLat, bumpLng, movementDirection, previousLat = null, previousLng = null, bumpId) => {
     const currentDistance = calculateDistance(currentLat, currentLng, bumpLat, bumpLng);
     
-    // If we have previous position, prioritize distance progression
-    if (previousLat !== null && previousLng !== null) {
-      const previousDistance = calculateDistance(previousLat, previousLng, bumpLat, bumpLng);
-      const distanceChange = currentDistance - previousDistance;
-      
-      // Debug logging FIRST to see what's happening
-      if (process.env.NODE_ENV === 'development' && currentDistance < 300) {
-        console.log(`📊 Speed Bump Analysis:`);
-        console.log(`  Current Distance: ${currentDistance.toFixed(1)}m`);
-        console.log(`  Previous Distance: ${previousDistance.toFixed(1)}m`);
-        console.log(`  Distance Change: ${distanceChange > 0 ? '+' : ''}${distanceChange.toFixed(1)}m`);
-        console.log(`  Movement Direction: ${movementDirection.toFixed(1)}°`);
-      }
-      
-      // Strong distance-based detection with lower threshold
-      if (distanceChange > 1.0) {
-        // Moving away = behind
-        if (process.env.NODE_ENV === 'development' && currentDistance < 300) {
-          console.log(`  🔄 MOVING AWAY → BEHIND`);
-        }
-        return false;
-      } else if (distanceChange < -1.0) {
-        // Moving closer = ahead  
-        if (process.env.NODE_ENV === 'development' && currentDistance < 300) {
-          console.log(`  🔄 MOVING CLOSER → AHEAD`);
-        }
-        return true;
-      } else {
-        // Small distance change, use angle-based detection
-        const bearingToBump = calculateBearing(currentLat, currentLng, bumpLat, bumpLng);
-        let angleDiff = Math.abs(bearingToBump - movementDirection);
-        if (angleDiff > 180) {
-          angleDiff = 360 - angleDiff;
-        }
-        
-        const isAhead = angleDiff < 90;
-        
-        if (process.env.NODE_ENV === 'development' && currentDistance < 300) {
-          console.log(`  🧭 Using angle: ToBump=${bearingToBump.toFixed(1)}°, Diff=${angleDiff.toFixed(1)}° → ${isAhead ? 'AHEAD' : 'BEHIND'}`);
-        }
-        
-        return isAhead;
-      }
+    // Track minimum distance we've been to this bump
+    const currentMinDistance = speedBumpMinDistances[bumpId] || currentDistance;
+    const newMinDistance = Math.min(currentMinDistance, currentDistance);
+    
+    // Track previous distance for better movement detection
+    const prevDistance = speedBumpPrevDistances[bumpId] || currentDistance;
+    
+    // Update state
+    if (newMinDistance !== currentMinDistance) {
+      setSpeedBumpMinDistances(prev => ({
+        ...prev,
+        [bumpId]: newMinDistance
+      }));
     }
     
-    // Fallback to angle-based detection if no previous position
-    const bearingToBump = calculateBearing(currentLat, currentLng, bumpLat, bumpLng);
-    let angleDiff = Math.abs(bearingToBump - movementDirection);
-    if (angleDiff > 180) {
-      angleDiff = 360 - angleDiff;
+    setSpeedBumpPrevDistances(prev => ({
+      ...prev,
+      [bumpId]: currentDistance
+    }));
+    
+    const haveBeenClose = newMinDistance < 20; // Within 20m at some point
+    const distanceChange = currentDistance - prevDistance; // Positive means moving away
+    const isMovingAway = distanceChange > 0.5; // Moving away by at least 0.5m
+    const farFromMin = currentDistance > (newMinDistance + 15); // More than 15m past minimum
+    
+    // Debug logging
+    if (process.env.NODE_ENV === 'development' && currentDistance < 100) {
+      console.log(`🚦 Bump ${bumpId.slice(-4)}: Distance ${currentDistance.toFixed(1)}m (min: ${newMinDistance.toFixed(1)}m)`);
+      console.log(`  HaveBeenClose: ${haveBeenClose} (${newMinDistance.toFixed(1)} < 20)`);
+      console.log(`  DistanceChange: ${distanceChange.toFixed(1)}m (from prev ${prevDistance.toFixed(1)}m)`);
+      console.log(`  IsMovingAway: ${isMovingAway} (change > 0.5)`);
+      console.log(`  FarFromMin: ${farFromMin} (${currentDistance.toFixed(1)} > ${(newMinDistance + 15).toFixed(1)})`);
     }
     
-    return angleDiff < 90;
-  }, [calculateBearing, calculateDistance]);
+    // If we've been close and are now moving away and far from minimum, it's behind us
+    if (haveBeenClose && isMovingAway && farFromMin) {
+      if (process.env.NODE_ENV === 'development' && currentDistance < 100) {
+        console.log(`  → BEHIND`);
+      }
+      return false;
+    }
+    
+    if (process.env.NODE_ENV === 'development' && currentDistance < 100) {
+      console.log(`  → AHEAD`);
+    }
+    return true;
+  }, [calculateDistance, speedBumpMinDistances, setSpeedBumpMinDistances, speedBumpPrevDistances, setSpeedBumpPrevDistances]);
 
   // Get compass direction from bearing
   const getCompassDirection = useCallback((bearing) => {
@@ -240,7 +233,6 @@ function App() {
     // Priority 1: Use GPS speed if reliable
     if (gpsSpeed !== null && gpsSpeed !== undefined && gpsSpeed >= 0) {
       calculatedSpeed = gpsSpeed * 3.6; // Convert m/s to km/h
-      console.log(`📍 GPS Speed: ${calculatedSpeed.toFixed(1)} km/h`);
     } 
     // Priority 2: Calculate from position changes
     else if (previousLocation && currentTime - lastUpdateTime > 300) { // Reduced interval to 300ms for better responsiveness
@@ -254,14 +246,12 @@ function App() {
       const timeInterval = currentTime - lastUpdateTime;
       
       // Calculate speed even for small movements to be more responsive
-      if (distance > 0.1 && timeInterval > 300) { // Reduced minimum distance to 0.1m
+      if (distance > 1.0 && timeInterval > 500) { // Increased minimum distance back to 1m and time to 500ms
         const speedMPS = distance / (timeInterval / 1000);
         calculatedSpeed = Math.max(0, speedMPS * 3.6); // Convert to km/h
-        console.log(`🧮 Calculated Speed: ${calculatedSpeed.toFixed(1)} km/h (dist: ${distance.toFixed(1)}m, time: ${timeInterval}ms)`);
-      } else if (distance <= 0.1) {
+      } else if (distance <= 1.0) {
         // If barely moving, set speed to 0
         calculatedSpeed = 0;
-        console.log('🛑 No significant movement, speed = 0');
       } else {
         // Keep previous speed for very short time intervals
         calculatedSpeed = speed;
@@ -279,14 +269,14 @@ function App() {
       const smoothedSpeed = prevSpeed * (1 - smoothingFactor) + calculatedSpeed * smoothingFactor;
       const finalSpeed = Math.max(0, Math.round(smoothedSpeed * 10) / 10); // Round to 1 decimal
       
-      if (Math.abs(finalSpeed - prevSpeed) > 0.5) {
+      if (Math.abs(finalSpeed - prevSpeed) > 2.0) {
         console.log(`⚡ Speed updated: ${prevSpeed.toFixed(1)} → ${finalSpeed.toFixed(1)} km/h`);
       }
       
       return finalSpeed;
     });
 
-    if (previousLocation && currentTime - lastUpdateTime > 200) { // Reduced to 200ms for more responsive direction updates during ahead/behind detection
+    if (previousLocation && currentTime - lastUpdateTime > 500) { // Increased back to 500ms for stable direction updates
       const newDirection = calculateBearing(
         previousLocation.latitude,
         previousLocation.longitude,
@@ -296,7 +286,6 @@ function App() {
       
       if (!isNaN(newDirection)) {
         setDirection(newDirection);
-        console.log(`🧭 Direction updated: ${newDirection.toFixed(1)}°`);
       }
       
       setLastUpdateTime(currentTime);
@@ -346,10 +335,6 @@ function App() {
     let elapsedTime = 0;
     
     console.log('🚗 Starting GPS Driving Simulation');
-    console.log(`📍 Start: ${startLat.toFixed(6)}, ${startLng.toFixed(6)}`);
-    console.log(`🧭 Direction: ${direction}° (0=N, 90=E, 180=S, 270=W)`);
-    console.log(`⏱️ Duration: ${duration}s, Max Speed: ${maxSpeed} km/h`);
-    console.log('💡 Add speed bumps along the route to test detection!');
     
     const simulation = setInterval(() => {
       elapsedTime += updateInterval / 1000;
@@ -399,8 +384,6 @@ function App() {
       
       // Update app with simulated position
       handlePositionUpdate(mockPosition);
-      
-      console.log(`🚗 ${elapsedTime.toFixed(1)}s - Speed: ${currentSpeed.toFixed(1)} km/h - Pos: ${currentLat.toFixed(6)}, ${currentLng.toFixed(6)}`);
       
       // Stop simulation when duration reached
       if (elapsedTime >= duration) {
@@ -498,19 +481,8 @@ function App() {
         console.log('📡 Starting real GPS tracking...');
         startTracking();
       };
-      
-      // Log available testing commands (development only)
-      console.log('\n🧪 GPS TESTING COMMANDS AVAILABLE:');
-      console.log('runQuickTest() - Setup test route with speed bumps');
-      console.log('startDrivingSimulation(options) - Start GPS simulation');
-      console.log('  Options: { startLat, startLng, direction, duration, maxSpeed, updateInterval }');
-      console.log('addSpeedBumpHere(lat, lng) - Add speed bump at coordinates');
-      console.log('createTestRoute(startLat, startLng, endLat, endLng, bumpCount) - Create test bumps');
-      console.log('\n💡 Quick start: runQuickTest() then startDrivingSimulation()');
-      console.log('🛑 Stop anytime: window.drivingSimulation.stop()');
-      console.log('�️ Desktop: Use the Test button in the UI');
     }
-  }, [startDrivingSimulation, direction, user?.uid, getCompassDirection]);
+  }, [startDrivingSimulation, direction, user?.uid, getCompassDirection, startTracking]);
 
   // Calculate geographic bounding box for efficient querying
   const getGeographicBounds = useCallback((centerLat, centerLng, radiusKm) => {
@@ -1009,7 +981,6 @@ function App() {
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
     
     if (isMobile) {
-      console.log('📱 Mobile device detected - starting GPS tracking automatically');
       const cleanup = startTracking();
       return () => {
         if (cleanup && typeof cleanup === 'function') {
@@ -1017,10 +988,33 @@ function App() {
         }
       };
     } else {
-      console.log('🏠 Desktop detected - GPS tracking manual only');
-      console.log('💡 Use startGPSTracking() or the test button to start');
+      // Desktop - GPS tracking manual only
     }
   }, [startTracking]);
+
+  // Cleanup speed bump tracking when bumps are removed
+  useEffect(() => {
+    const currentBumpIds = speedBumps.map(bump => bump.id);
+    setSpeedBumpMinDistances(prevDistances => {
+      const filteredDistances = {};
+      currentBumpIds.forEach(id => {
+        if (prevDistances[id] !== undefined) {
+          filteredDistances[id] = prevDistances[id];
+        }
+      });
+      return filteredDistances;
+    });
+    
+    setSpeedBumpPrevDistances(prevDistances => {
+      const filteredDistances = {};
+      currentBumpIds.forEach(id => {
+        if (prevDistances[id] !== undefined) {
+          filteredDistances[id] = prevDistances[id];
+        }
+      });
+      return filteredDistances;
+    });
+  }, [speedBumps]);
 
   // Find nearby speed bumps
   useEffect(() => {
@@ -1041,7 +1035,8 @@ function App() {
           bump.longitude, 
           direction,
           previousLocation?.latitude,
-          previousLocation?.longitude
+          previousLocation?.longitude,
+          bump.id
         );
         
         // Include if:
@@ -1066,7 +1061,8 @@ function App() {
           bump.longitude, 
           direction,
           previousLocation?.latitude,
-          previousLocation?.longitude
+          previousLocation?.longitude,
+          bump.id
         );
         
         return {
@@ -1115,7 +1111,7 @@ function App() {
         setTimeout(() => setIsDangerMode(true), 800);
       }
     }
-  }, [location, speedBumps, calculateDistance, direction, isSpeedBumpAhead, speedBumpsAhead.length, playWarningSound, triggerVibration, previousLocation]);
+  }, [location, speedBumps, calculateDistance, direction, isSpeedBumpAhead, speedBumpsAhead.length, playWarningSound, triggerVibration, previousLocation, speedBumpMinDistances, speedBumpPrevDistances]);
 
   // Check direction similarity
   const isDirectionSimilar = useCallback((dir1, dir2, tolerance = 45) => {

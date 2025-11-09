@@ -224,6 +224,7 @@
   color: #95A5A6;
   margin-top: 5px;
   font-style: italic;
+  text-align: center;
 }
 
 /* Speed Bumps Area - Top Section */
@@ -527,10 +528,12 @@
   background: rgba(255, 255, 255, 0.1);
   border-radius: 15px;
   padding: 15px;
+  padding-left: 25px; /* Additional left padding */
   border-left: 5px solid #FF6B6B;
   backdrop-filter: blur(10px);
   transition: all 0.3s ease;
   position: relative;
+  text-align: center; /* Center all text content */
 }
 
 .speed-bump-warning:hover {
@@ -635,20 +638,25 @@
 }
 
 .bump-distance {
-  font-size: 1.2em;
+  font-size: 1.4em;
   font-weight: bold;
   color: #FFF;
-  margin-bottom: 5px;
+  margin-bottom: 8px;
+  text-align: center;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+  padding: 5px 0;
 }
 
 .bump-direction {
   font-size: 1em;
   margin-bottom: 5px;
+  text-align: center;
 }
 
 .bump-speed {
   font-size: 0.9em;
   color: #B0B0B0;
+  text-align: center;
 }
 
 .no-speed-bumps {

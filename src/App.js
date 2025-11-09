@@ -32,6 +32,7 @@ function App() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isDangerMode, setIsDangerMode] = useState(false);
   const [speedBumpsAhead, setSpeedBumpsAhead] = useState([]);
+  const [testMode, setTestMode] = useState('setup'); // 'setup', 'ready', 'running'
 
   const NEARBY_DISTANCE = 500; // meters - for display
   const QUERY_RADIUS = 100; // kilometers - for database query
@@ -67,22 +68,65 @@ function App() {
   }, []);
 
   // Enhanced direction calculation - determines if speed bump is ahead or behind based on movement
-  const isSpeedBumpAhead = useCallback((currentLat, currentLng, bumpLat, bumpLng, movementDirection) => {
+  const isSpeedBumpAhead = useCallback((currentLat, currentLng, bumpLat, bumpLng, movementDirection, previousLat = null, previousLng = null) => {
     if (!movementDirection && movementDirection !== 0) return true; // Default to ahead if no direction
     
-    // Calculate bearing from current position to speed bump
-    const bearingToBump = calculateBearing(currentLat, currentLng, bumpLat, bumpLng);
+    const currentDistance = calculateDistance(currentLat, currentLng, bumpLat, bumpLng);
     
-    // Calculate the difference between movement direction and bearing to bump
+    // If we have previous position, prioritize distance progression
+    if (previousLat !== null && previousLng !== null) {
+      const previousDistance = calculateDistance(previousLat, previousLng, bumpLat, bumpLng);
+      const distanceChange = currentDistance - previousDistance;
+      
+      // Debug logging FIRST to see what's happening
+      if (process.env.NODE_ENV === 'development' && currentDistance < 300) {
+        console.log(`📊 Speed Bump Analysis:`);
+        console.log(`  Current Distance: ${currentDistance.toFixed(1)}m`);
+        console.log(`  Previous Distance: ${previousDistance.toFixed(1)}m`);
+        console.log(`  Distance Change: ${distanceChange > 0 ? '+' : ''}${distanceChange.toFixed(1)}m`);
+        console.log(`  Movement Direction: ${movementDirection.toFixed(1)}°`);
+      }
+      
+      // Strong distance-based detection with lower threshold
+      if (distanceChange > 1.0) {
+        // Moving away = behind
+        if (process.env.NODE_ENV === 'development' && currentDistance < 300) {
+          console.log(`  🔄 MOVING AWAY → BEHIND`);
+        }
+        return false;
+      } else if (distanceChange < -1.0) {
+        // Moving closer = ahead  
+        if (process.env.NODE_ENV === 'development' && currentDistance < 300) {
+          console.log(`  🔄 MOVING CLOSER → AHEAD`);
+        }
+        return true;
+      } else {
+        // Small distance change, use angle-based detection
+        const bearingToBump = calculateBearing(currentLat, currentLng, bumpLat, bumpLng);
+        let angleDiff = Math.abs(bearingToBump - movementDirection);
+        if (angleDiff > 180) {
+          angleDiff = 360 - angleDiff;
+        }
+        
+        const isAhead = angleDiff < 90;
+        
+        if (process.env.NODE_ENV === 'development' && currentDistance < 300) {
+          console.log(`  🧭 Using angle: ToBump=${bearingToBump.toFixed(1)}°, Diff=${angleDiff.toFixed(1)}° → ${isAhead ? 'AHEAD' : 'BEHIND'}`);
+        }
+        
+        return isAhead;
+      }
+    }
+    
+    // Fallback to angle-based detection if no previous position
+    const bearingToBump = calculateBearing(currentLat, currentLng, bumpLat, bumpLng);
     let angleDiff = Math.abs(bearingToBump - movementDirection);
     if (angleDiff > 180) {
       angleDiff = 360 - angleDiff;
     }
     
-    // If angle difference is less than 90 degrees, speed bump is ahead
-    // If more than 90 degrees, it's behind
     return angleDiff < 90;
-  }, [calculateBearing]);
+  }, [calculateBearing, calculateDistance]);
 
   // Get compass direction from bearing
   const getCompassDirection = useCallback((bearing) => {
@@ -242,7 +286,7 @@ function App() {
       return finalSpeed;
     });
 
-    if (previousLocation && currentTime - lastUpdateTime > 500) {
+    if (previousLocation && currentTime - lastUpdateTime > 200) { // Reduced to 200ms for more responsive direction updates during ahead/behind detection
       const newDirection = calculateBearing(
         previousLocation.latitude,
         previousLocation.longitude,
@@ -252,6 +296,7 @@ function App() {
       
       if (!isNaN(newDirection)) {
         setDirection(newDirection);
+        console.log(`🧭 Direction updated: ${newDirection.toFixed(1)}°`);
       }
       
       setLastUpdateTime(currentTime);
@@ -283,6 +328,189 @@ function App() {
       return () => {}; // Return empty function if geolocation not supported
     }
   }, [handlePositionUpdate]);
+
+  // GPS Driving Simulator for Testing (Development Only)
+  const startDrivingSimulation = useCallback((options = {}) => {
+    const {
+      startLat = 37.7749,     // San Francisco starting point
+      startLng = -122.4194,
+      direction = 90,         // 90 = East, 0 = North, 180 = South, 270 = West
+      duration = 60,          // seconds
+      maxSpeed = 50,          // km/h
+      updateInterval = 1000   // ms
+    } = options;
+
+    let currentLat = startLat;
+    let currentLng = startLng;
+    let currentSpeed = 0;
+    let elapsedTime = 0;
+    
+    console.log('🚗 Starting GPS Driving Simulation');
+    console.log(`📍 Start: ${startLat.toFixed(6)}, ${startLng.toFixed(6)}`);
+    console.log(`🧭 Direction: ${direction}° (0=N, 90=E, 180=S, 270=W)`);
+    console.log(`⏱️ Duration: ${duration}s, Max Speed: ${maxSpeed} km/h`);
+    console.log('💡 Add speed bumps along the route to test detection!');
+    
+    const simulation = setInterval(() => {
+      elapsedTime += updateInterval / 1000;
+      
+      // Simulate realistic speed changes
+      if (elapsedTime < 10) {
+        // Acceleration phase (0-10 seconds)
+        currentSpeed = (elapsedTime / 10) * maxSpeed;
+      } else if (elapsedTime > duration - 10) {
+        // Deceleration phase (last 10 seconds)
+        const timeToStop = duration - elapsedTime;
+        currentSpeed = (timeToStop / 10) * maxSpeed;
+      } else {
+        // Cruising phase with slight variations
+        const variation = Math.sin(elapsedTime * 0.1) * 5; // ±5 km/h variation
+        currentSpeed = maxSpeed + variation;
+      }
+      
+      currentSpeed = Math.max(0, Math.min(currentSpeed, maxSpeed));
+      
+      // Calculate distance moved in this interval
+      const speedMPS = currentSpeed / 3.6; // Convert km/h to m/s
+      const distanceMeters = speedMPS * (updateInterval / 1000);
+      
+      // Convert direction to radians and calculate new position
+      const directionRad = (direction * Math.PI) / 180;
+      const earthRadius = 6371000; // Earth radius in meters
+      
+      // Calculate bearing offset (lat/lng delta)
+      const deltaLat = (distanceMeters * Math.cos(directionRad)) / earthRadius;
+      const deltaLng = (distanceMeters * Math.sin(directionRad)) / (earthRadius * Math.cos(currentLat * Math.PI / 180));
+      
+      // Update position
+      currentLat += deltaLat * (180 / Math.PI);
+      currentLng += deltaLng * (180 / Math.PI);
+      
+      // Create mock GPS position
+      const mockPosition = {
+        coords: {
+          latitude: currentLat,
+          longitude: currentLng,
+          accuracy: 5,
+          speed: speedMPS // GPS speed in m/s
+        },
+        timestamp: Date.now()
+      };
+      
+      // Update app with simulated position
+      handlePositionUpdate(mockPosition);
+      
+      console.log(`🚗 ${elapsedTime.toFixed(1)}s - Speed: ${currentSpeed.toFixed(1)} km/h - Pos: ${currentLat.toFixed(6)}, ${currentLng.toFixed(6)}`);
+      
+      // Stop simulation when duration reached
+      if (elapsedTime >= duration) {
+        clearInterval(simulation);
+        console.log('🏁 Driving simulation completed!');
+        console.log(`📍 End: ${currentLat.toFixed(6)}, ${currentLng.toFixed(6)}`);
+        
+        // Add to window object for easy console access
+        window.simulationEndPosition = { lat: currentLat, lng: currentLng };
+        console.log('💡 End position saved as window.simulationEndPosition');
+      }
+    }, updateInterval);
+    
+    // Return simulation control object
+    const controller = {
+      stop: () => {
+        clearInterval(simulation);
+        console.log('⏹️ Simulation stopped manually');
+      },
+      getCurrentPosition: () => ({ lat: currentLat, lng: currentLng, speed: currentSpeed })
+    };
+    
+    // Make it globally accessible
+    window.drivingSimulation = controller;
+    console.log('💡 Simulation saved as window.drivingSimulation (use .stop() to end early)');
+    
+    return controller;
+  }, [handlePositionUpdate]);
+
+  // Make simulation functions globally accessible for console testing
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      // Make main simulation function available
+      window.startDrivingSimulation = startDrivingSimulation;
+      
+      // Helper function to add speed bump at specific coordinates
+      window.addSpeedBumpHere = (lat, lng) => {
+        if (!lat || !lng) {
+          console.log('❌ Please provide latitude and longitude: addSpeedBumpHere(lat, lng)');
+          return;
+        }
+        
+        console.log(`📌 Adding speed bump at ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+        
+        const mockBump = {
+          id: `test-${Date.now()}`,
+          latitude: lat,
+          longitude: lng,
+          direction: direction,
+          compassDirection: getCompassDirection(direction),
+          userId: user?.uid || 'test-user',
+          timestamp: new Date().toISOString()
+        };
+        
+        setSpeedBumps(prev => [...prev, mockBump]);
+        console.log('✅ Speed bump added for testing!');
+      };
+      
+      // Helper to create speed bumps along a route
+      window.createTestRoute = (startLat, startLng, endLat, endLng, bumpCount = 3) => {
+        console.log(`🛣️ Creating test route with ${bumpCount} speed bumps`);
+        
+        for (let i = 0; i < bumpCount; i++) {
+          const progress = (i + 1) / (bumpCount + 1); // Distribute evenly along route
+          const lat = startLat + (endLat - startLat) * progress;
+          const lng = startLng + (endLng - startLng) * progress;
+          
+          window.addSpeedBumpHere(lat, lng);
+        }
+        
+        console.log(`✅ Created ${bumpCount} test speed bumps along route`);
+      };
+      
+      // Quick test scenarios
+      window.runQuickTest = () => {
+        console.log('🚀 Setting up quick test scenario...');
+        console.log('📋 This will create speed bumps for testing');
+        
+        // Create a straight eastward route with speed bumps
+        const startLat = 37.7749;
+        const startLng = -122.4194;
+        const endLat = 37.7749;
+        const endLng = -122.4100; // About 1km east
+        
+        // Add 3 speed bumps along the route
+        window.createTestRoute(startLat, startLng, endLat, endLng, 3);
+        
+        console.log('✅ Speed bumps added to test route');
+        console.log('🚗 Now run: startDrivingSimulation() to begin driving test');
+        console.log('💡 Or customize: startDrivingSimulation({ maxSpeed: 60, duration: 120 })');
+      };
+      
+      // Real GPS tracking function
+      window.startGPSTracking = () => {
+        console.log('📡 Starting real GPS tracking...');
+        startTracking();
+      };
+      
+      // Log available testing commands (development only)
+      console.log('\n🧪 GPS TESTING COMMANDS AVAILABLE:');
+      console.log('runQuickTest() - Setup test route with speed bumps');
+      console.log('startDrivingSimulation(options) - Start GPS simulation');
+      console.log('  Options: { startLat, startLng, direction, duration, maxSpeed, updateInterval }');
+      console.log('addSpeedBumpHere(lat, lng) - Add speed bump at coordinates');
+      console.log('createTestRoute(startLat, startLng, endLat, endLng, bumpCount) - Create test bumps');
+      console.log('\n💡 Quick start: runQuickTest() then startDrivingSimulation()');
+      console.log('🛑 Stop anytime: window.drivingSimulation.stop()');
+      console.log('�️ Desktop: Use the Test button in the UI');
+    }
+  }, [startDrivingSimulation, direction, user?.uid, getCompassDirection]);
 
   // Calculate geographic bounding box for efficient querying
   const getGeographicBounds = useCallback((centerLat, centerLng, radiusKm) => {
@@ -775,14 +1003,23 @@ function App() {
     };
   }, [activeQueryUnsubscribe]);
 
-  // Initialize tracking on component mount
+  // Initialize GPS tracking automatically (only on mobile devices)
   useEffect(() => {
-    const cleanup = startTracking();
-    return () => {
-      if (cleanup && typeof cleanup === 'function') {
-        cleanup();
-      }
-    };
+    // Check if device is mobile
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+    
+    if (isMobile) {
+      console.log('📱 Mobile device detected - starting GPS tracking automatically');
+      const cleanup = startTracking();
+      return () => {
+        if (cleanup && typeof cleanup === 'function') {
+          cleanup();
+        }
+      };
+    } else {
+      console.log('🏠 Desktop detected - GPS tracking manual only');
+      console.log('💡 Use startGPSTracking() or the test button to start');
+    }
   }, [startTracking]);
 
   // Find nearby speed bumps
@@ -802,7 +1039,9 @@ function App() {
           location.longitude, 
           bump.latitude, 
           bump.longitude, 
-          direction
+          direction,
+          previousLocation?.latitude,
+          previousLocation?.longitude
         );
         
         // Include if:
@@ -825,7 +1064,9 @@ function App() {
           location.longitude, 
           bump.latitude, 
           bump.longitude, 
-          direction
+          direction,
+          previousLocation?.latitude,
+          previousLocation?.longitude
         );
         
         return {
@@ -874,7 +1115,7 @@ function App() {
         setTimeout(() => setIsDangerMode(true), 800);
       }
     }
-  }, [location, speedBumps, calculateDistance, direction, isSpeedBumpAhead, speedBumpsAhead.length, playWarningSound, triggerVibration]);
+  }, [location, speedBumps, calculateDistance, direction, isSpeedBumpAhead, speedBumpsAhead.length, playWarningSound, triggerVibration, previousLocation]);
 
   // Check direction similarity
   const isDirectionSimilar = useCallback((dir1, dir2, tolerance = 45) => {
@@ -883,11 +1124,9 @@ function App() {
   }, []);
 
   // Initialize tracking on component mount
-  useEffect(() => {
-    const cleanup = startTracking();
-    return cleanup;
-  }, [startTracking]);
-
+  // Removed duplicate GPS auto-start - GPS tracking now manual only
+  // Use window.startGPSTracking() to begin real GPS tracking
+  
     return (
     <div className={`App ${isDangerMode ? 'danger-mode' : ''}`}>
       {isAuthenticating && (
@@ -934,6 +1173,49 @@ function App() {
             >
               {autoRefresh ? '🔄 Auto' : '⏸️ Manual'}
             </button>
+            
+            {/* Test button for desktop/development only */}
+            {(process.env.NODE_ENV === 'development' || window.innerWidth >= 768) && (
+              <button 
+                onClick={() => {
+                  if (testMode === 'setup' || testMode === 'ready') {
+                    console.log('🚗 Starting GPS driving simulation...');
+                    setTestMode('running');
+                    
+                    // Start the driving simulation without any speed bumps
+                    startDrivingSimulation({
+                      startLat: 37.7749,
+                      startLng: -122.4194,
+                      direction: 90, // East
+                      duration: 300, // 5 minutes to give time for testing
+                      maxSpeed: 50
+                    });
+                    
+                    console.log('🏁 Simulation started! Add speed bumps manually to test detection.');
+                    console.log('💡 Click the dashboard or use console to add speed bumps.');
+                    
+                  } else {
+                    // Stop simulation and reset
+                    console.log('🔄 Stopping simulation...');
+                    setTestMode('setup');
+                    
+                    // Stop any running simulation
+                    if (window.drivingSimulation) {
+                      window.drivingSimulation.stop();
+                    }
+                    
+                    console.log('✅ Simulation stopped. Click Test to start again.');
+                  }
+                }}
+                className="test-btn"
+                title={
+                  testMode === 'running' ? 'Stop GPS simulation' : 'Start GPS driving simulation'
+                }
+              >
+                {testMode === 'running' ? '⏹️ Stop' : '🚗 Drive'}
+              </button>
+            )}
+            
             <button 
               onClick={() => {
                 if (location.latitude && location.longitude) {
@@ -948,6 +1230,21 @@ function App() {
             >
               {isLoadingSpeedBumps ? '🔄 Loading...' : '🔍 Refresh'}
             </button>
+            
+            {/* GPS Start button for desktop only */}
+            {window.innerWidth >= 768 && !isTracking && (
+              <button 
+                onClick={() => {
+                  console.log('📡 Starting GPS tracking manually...');
+                  startTracking();
+                }}
+                className="gps-start-btn"
+                title="Start real GPS tracking (Desktop only)"
+              >
+                📡 GPS
+              </button>
+            )}
+            
             {user && (
               <button 
                 onClick={() => setIsUserInfoVisible(!isUserInfoVisible)} 

@@ -308,6 +308,56 @@
   color: #4ECDC4;
 }
 
+.test-btn {
+  background: linear-gradient(45deg, #ff6b35, #f7931e);
+  color: white;
+  border: none;
+  padding: 8px 15px;
+  border-radius: 20px;
+  font-size: 0.9em;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+  box-shadow: 0 2px 10px rgba(255, 107, 53, 0.3);
+}
+
+.test-btn:hover {
+  background: linear-gradient(45deg, #ff5722, #ff9800);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(255, 87, 34, 0.4);
+}
+
+.test-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(255, 87, 34, 0.3);
+}
+
+.gps-start-btn {
+  background: linear-gradient(45deg, #00b4db, #0083b0);
+  color: white;
+  border: none;
+  padding: 8px 15px;
+  border-radius: 20px;
+  font-size: 0.9em;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+  box-shadow: 0 2px 10px rgba(0, 180, 219, 0.3);
+}
+
+.gps-start-btn:hover {
+  background: linear-gradient(45deg, #0082c8, #006ba1);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(0, 130, 176, 0.4);
+}
+
+.gps-start-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(0, 130, 176, 0.3);
+}
+
 .refresh-btn {
   background: linear-gradient(45deg, #4ECDC4, #44A08D);
   color: white;

@@ -183,19 +183,23 @@ function App() {
     }
   }, []);
 
-  // Handle new position data with improved speed calculation
+  // Handle new position data with enhanced speed calculation
   const handlePositionUpdate = useCallback((position) => {
     const { latitude, longitude, accuracy, speed: gpsSpeed } = position.coords;
     const currentTime = Date.now();
     
     setLocation({ latitude, longitude, accuracy });
 
-    // Use GPS speed if available, otherwise calculate from distance
+    // Enhanced speed calculation with better fallbacks
     let calculatedSpeed = 0;
     
+    // Priority 1: Use GPS speed if reliable
     if (gpsSpeed !== null && gpsSpeed !== undefined && gpsSpeed >= 0) {
       calculatedSpeed = gpsSpeed * 3.6; // Convert m/s to km/h
-    } else if (previousLocation && currentTime - lastUpdateTime > 500) { // Update every 500ms minimum
+      console.log(`📍 GPS Speed: ${calculatedSpeed.toFixed(1)} km/h`);
+    } 
+    // Priority 2: Calculate from position changes
+    else if (previousLocation && currentTime - lastUpdateTime > 300) { // Reduced interval to 300ms for better responsiveness
       const distance = calculateDistance(
         previousLocation.latitude,
         previousLocation.longitude,
@@ -205,19 +209,37 @@ function App() {
       
       const timeInterval = currentTime - lastUpdateTime;
       
-      // Only calculate if moved significantly
-      if (distance > 0.5 && timeInterval > 500) { // Moved at least 0.5m
+      // Calculate speed even for small movements to be more responsive
+      if (distance > 0.1 && timeInterval > 300) { // Reduced minimum distance to 0.1m
         const speedMPS = distance / (timeInterval / 1000);
-        calculatedSpeed = Math.max(0, speedMPS * 3.6); // Convert to km/h, ensure non-negative
+        calculatedSpeed = Math.max(0, speedMPS * 3.6); // Convert to km/h
+        console.log(`🧮 Calculated Speed: ${calculatedSpeed.toFixed(1)} km/h (dist: ${distance.toFixed(1)}m, time: ${timeInterval}ms)`);
+      } else if (distance <= 0.1) {
+        // If barely moving, set speed to 0
+        calculatedSpeed = 0;
+        console.log('🛑 No significant movement, speed = 0');
       } else {
-        calculatedSpeed = speed; // Keep previous speed if no significant movement
+        // Keep previous speed for very short time intervals
+        calculatedSpeed = speed;
       }
     }
+    // Priority 3: Keep current speed if no data available
+    else {
+      calculatedSpeed = speed;
+    }
 
-    // Smooth speed calculation to reduce noise
+    // Improved speed smoothing - less aggressive to be more responsive
     setSpeed(prevSpeed => {
-      const smoothedSpeed = prevSpeed * 0.7 + calculatedSpeed * 0.3;
-      return Math.max(0, smoothedSpeed);
+      // Use less smoothing when speed is increasing (acceleration)
+      const smoothingFactor = calculatedSpeed > prevSpeed ? 0.4 : 0.6;
+      const smoothedSpeed = prevSpeed * (1 - smoothingFactor) + calculatedSpeed * smoothingFactor;
+      const finalSpeed = Math.max(0, Math.round(smoothedSpeed * 10) / 10); // Round to 1 decimal
+      
+      if (Math.abs(finalSpeed - prevSpeed) > 0.5) {
+        console.log(`⚡ Speed updated: ${prevSpeed.toFixed(1)} → ${finalSpeed.toFixed(1)} km/h`);
+      }
+      
+      return finalSpeed;
     });
 
     if (previousLocation && currentTime - lastUpdateTime > 500) {
@@ -250,8 +272,8 @@ function App() {
         },
         {
           enableHighAccuracy: true,
-          timeout: 5000,
-          maximumAge: 0 // Always get fresh position
+          timeout: 10000, // Increased timeout for better GPS lock
+          maximumAge: 1000 // Allow 1 second old readings for better performance
         }
       );
       
@@ -483,30 +505,97 @@ function App() {
     }
   }, []);
 
-  // Fullscreen functionality
+  // Enhanced fullscreen functionality with mobile support
   const toggleFullscreen = useCallback(async () => {
     try {
-      if (!document.fullscreenElement) {
-        await document.documentElement.requestFullscreen();
+      const elem = document.documentElement;
+      
+      // Check if already in fullscreen
+      const isCurrentlyFullscreen = !!(
+        document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        document.mozFullScreenElement ||
+        document.msFullscreenElement
+      );
+      
+      if (!isCurrentlyFullscreen) {
+        // Request fullscreen with fallbacks for different browsers
+        if (elem.requestFullscreen) {
+          await elem.requestFullscreen();
+        } else if (elem.webkitRequestFullscreen) {
+          // Safari & Chrome iOS
+          await elem.webkitRequestFullscreen();
+        } else if (elem.webkitRequestFullScreen) {
+          // Older webkit
+          await elem.webkitRequestFullScreen();
+        } else if (elem.mozRequestFullScreen) {
+          // Firefox
+          await elem.mozRequestFullScreen();
+        } else if (elem.msRequestFullscreen) {
+          // IE/Edge
+          await elem.msRequestFullscreen();
+        } else {
+          // Mobile fallback - hide browser UI
+          window.scrollTo(0, 1);
+          setTimeout(() => window.scrollTo(0, 0), 0);
+        }
         setIsFullscreen(true);
       } else {
-        await document.exitFullscreen();
+        // Exit fullscreen with fallbacks
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+          await document.webkitExitFullscreen();
+        } else if (document.webkitCancelFullScreen) {
+          await document.webkitCancelFullScreen();
+        } else if (document.mozCancelFullScreen) {
+          await document.mozCancelFullScreen();
+        } else if (document.msExitFullscreen) {
+          await document.msExitFullscreen();
+        }
         setIsFullscreen(false);
       }
     } catch (error) {
       console.error('Error toggling fullscreen:', error);
+      // Mobile fallback for when fullscreen APIs fail
+      if (/iPad|iPhone|iPod|Android/i.test(navigator.userAgent)) {
+        // Add viewport meta tag manipulation for mobile
+        const viewport = document.querySelector('meta[name="viewport"]');
+        if (viewport) {
+          if (!isFullscreen) {
+            viewport.setAttribute('content', 'width=device-width, initial-scale=1.0, user-scalable=no, minimal-ui');
+          } else {
+            viewport.setAttribute('content', 'width=device-width, initial-scale=1.0, user-scalable=yes');
+          }
+        }
+        setIsFullscreen(!isFullscreen);
+      }
     }
-  }, []);
+  }, [isFullscreen]);
 
-  // Listen for fullscreen changes
+  // Listen for fullscreen changes with mobile support
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const isCurrentlyFullscreen = !!(
+        document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        document.mozFullScreenElement ||
+        document.msFullscreenElement
+      );
+      setIsFullscreen(isCurrentlyFullscreen);
     };
 
+    // Add listeners for all browser variants
     document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+    
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
     };
   }, []);
 
@@ -752,12 +841,16 @@ function App() {
         return a.distance - b.distance;
       });
       
-      setNearbySpeedBumps(nearby);
-      
       // Update danger mode and speed bumps ahead
       const bumpsAhead = nearby.filter(bump => bump.isAhead && bump.distance <= 300); // 300m warning distance
       setSpeedBumpsAhead(bumpsAhead);
       setIsDangerMode(bumpsAhead.length > 0);
+      
+      // Limit display to only the closest bump ahead and closest bump behind
+      const closestAhead = nearby.filter(bump => bump.isAhead).slice(0, 1); // Only closest ahead
+      const closestBehind = nearby.filter(bump => !bump.isAhead && bump.distance <= 200).slice(0, 1); // Only closest behind within 200m
+      const limitedNearby = [...closestAhead, ...closestBehind];
+      setNearbySpeedBumps(limitedNearby);
       
       // Trigger EXTREME alerts for very close speed bumps (within 150m)
       const veryCloseBumps = bumpsAhead.filter(bump => bump.distance <= 150);
